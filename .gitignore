@@ -9,3 +9,10 @@ __pycache__/
 *.py[cod]
 node_modules/
 .DS_Store
+dist/
+data/
+bot_config.json
+chat_history.json
+playwright-report/
+test-results/
+*.log

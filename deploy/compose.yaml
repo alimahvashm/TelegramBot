@@ -1,0 +1,30 @@
+services:
+  app:
+    image: ${DEPLOY_IMAGE:?Set DEPLOY_IMAGE}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - /opt/telegrambot/shared/.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /app/data
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - /opt/telegrambot/shared/data:/app/data
+    tmpfs:
+      - /tmp:size=128M,mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 2
+    pids_limit: 128
+    stop_grace_period: 240s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

@@ -1,24 +1,113 @@
-# TelegramBot
+# Voice Studio — TelegramBot
 
-Pushes to `main` deploy the tracked repository files to `root@46.8.231.179` after deployment is enabled.
+A TypeScript Telegram voice-to-text and conversation summary bot with an Express API and React, Vite, Tailwind management dashboard.
 
-## Deployment setup
+## Run locally
 
-In this repository's **Settings → Secrets and variables → Actions**, configure:
+Use **Node.js 22+**, **FFmpeg and FFprobe**. On Debian/Ubuntu, `sudo apt-get install ffmpeg` installs both audio tools; install Node 22 separately if the distribution ships an older version. On macOS, use `brew install ffmpeg node@22`.
 
-| Type | Name | Value |
-| --- | --- | --- |
-| Secret | `DEPLOY_SSH_KEY` | A dedicated deployment SSH private key; install its public key in the server's `/root/.ssh/authorized_keys`. |
-| Secret | `DEPLOY_KNOWN_HOSTS` | The server's SSH known-hosts entry, with its fingerprint verified through a trusted server console. |
-| Variable | `DEPLOY_PORT` | SSH port; defaults to `22`. |
-| Variable | `DEPLOY_ENABLED` | Set to `true` after server access and both secrets are configured. |
+```sh
+cp .env.example .env
+# Set ADMIN_PASSWORD in .env to a unique password of at least 16 characters.
+npm install
+npm run dev
+```
 
-The server must allow SSH from the GitHub runner and have `tar` and GNU `mv` installed. The workflow can also be run manually from the Actions tab.
+Open **http://localhost:5173** and sign in with `ADMIN_PASSWORD`. Vite proxies the API and events to Express on port 3000. The backend refuses to start without an admin password.
 
-Once enabled, a schedule checks the latest `main` every 15 minutes, so an outage does not require another push to retry deployment. GitHub may delay scheduled runs. Checks skip uploading when that commit is already deployed. Scheduled workflows in public repositories may be disabled after 60 days without repository activity.
+```sh
+npm run build
+npm start
+```
 
-Each deployment uploads a complete code snapshot to `/opt/telegrambot/releases/<commit>`. Only after successful upload does `/opt/telegrambot/current` switch to that snapshot. Previous releases are retained. Reserve these paths for this workflow.
+Production serves the dashboard and API together at **http://127.0.0.1:3000**. Keep it on loopback or behind an HTTPS reverse proxy. Microphone recording needs HTTPS or localhost.
 
-Keep bot tokens, runtime data, and server environment files outside release directories, for example in `/opt/telegrambot/shared`. Only tracked Git files are uploaded.
+## Connect the bot
 
-The project is currently empty: this workflow publishes code only. Dependency installation and bot startup/restart must be added when the application and its runtime are defined.
+1. Create a bot using [BotFather](https://t.me/BotFather). Enter its token under **Telegram bot**, enable polling, and save.
+2. Choose a speech engine and configure credentials or the endpoint. Save before testing in **Audio playground**.
+3. Configure an OpenRouter key for Server Cloud, or select OpenAI and enter an API key. **Verify & connect** checks credentials; **Save changes** persists them. Test summary uses the current form, including unsaved prompt/provider edits.
+4. Send a voice, audio, or video note. Use `/summary` for the last 30 messages, `/summary 50` for a custom count (maximum 100), and `/language fa-IR` or `/language en-US`. Group language commands require a group administrator.
+5. For full group history, disable privacy mode with BotFather `/setprivacy` and re-add the bot if necessary. The bot can only summarize messages Telegram has delivered since it started receiving updates. Explain to participants which AI providers process their messages.
+
+Only one process may poll a token. A data-directory lock prevents accidental local duplicates. Telegram 409 conflicts stop the worker and appear in the dashboard; stop the other instance or remove its webhook before clicking **Restart poller**. The app does not delete existing webhooks automatically.
+
+## Provider configuration
+
+| Provider                  | Configuration                           | Behavior                                                                                                                                                                                      |
+| ------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FastAPI / Whisper         | `targetApiUrl` or initial `FASTAPI_URL` | POST multipart `file` (16 kHz mono WAV) and `language` (`fa-IR` / `en-US`). Expects `{ "text": "..." }` or `{ "transcription": "..." }`. Deploy the Whisper service separately.               |
+| Gemini                    | API key and accessible model            | Sends inline WAV to `generateContent`. Default model is configurable (`gemini-2.5-flash`).                                                                                                    |
+| Google Chromium ASR       | Compatible Google Speech API key        | Experimental legacy `/speech-api/v2/recognize`, FLAC at 16 kHz, bounded rate-limit retries. This is not a supported, keyless Google Cloud Speech integration. Availability is not guaranteed. |
+| Server Cloud / OpenRouter | OpenRouter API key                      | Defaults to `openrouter/free`. A selected model, including `qwen/qwen3.8-27b:free` if available, falls back to `openrouter/free`.                                                             |
+| OpenAI                    | API key and accessible model            | Offers `gpt-4o-mini`, `gpt-4o`, `chatgpt-4o-latest`, plus verified models. Model retirement/access may cause a selected model to fail. Falls back to OpenRouter if its key is configured.     |
+
+**There is no embedded free API key.** Free routes still need credentials and quota. OpenAI API billing is separate from a ChatGPT subscription. Verifying `/v1/models` proves credential access, not inference billing or availability for every listed model. No provider guarantees uninterrupted service; failures produce clear messages rather than fabricated summaries.
+
+Audio is limited to **20 MB and 3 minutes**, with at most two active conversions. WAV output is 16 kHz, 16-bit PCM, mono. The browser includes a real spectrogram, microphone waveform, text copy, and WAV download. Temporary server files are removed after processing. Dashboard transcripts are returned to the browser and are not saved in chat history.
+
+## Persistence and security
+
+- `DATA_DIR` defaults to `./data`. `bot_config.json` stores settings and secrets with mode `0600`; the directory is `0700`. Secrets are **not encrypted at rest**. Protect the host and backups.
+- Environment credentials seed the first run. After saving, `bot_config.json` is authoritative. Blank secret inputs preserve stored values; use **Remove saved key** and save to remove a credential.
+- `chat_history.json` stores preferences, analytics, update offsets, and 200 messages per chat. Message content expires after 30 days. Tracking is bounded to 5,000 chats and 50,000 recent participant IDs. Directory/message totals are lifetime counters for retained chats.
+- History flushes every 15 seconds and after Telegram updates. Updates are acknowledged after handling. A crash before the offset is saved can repeat a reply or provider request; delivery is not exactly-once.
+- Admin APIs and SSE require eight-hour HttpOnly, SameSite sessions, bounded to 100, revoked on logout and reset on restart. Cross-origin writes are rejected. Login, API and provider requests are rate-limited.
+- Behind one HTTPS reverse proxy, set `COOKIE_SECURE=true`, `TRUST_PROXY=1`, and `APP_ORIGIN=https://your-domain`. Do not expose port 3000 publicly. SSE logs omit credentials and transcript text.
+- Downloads, provider calls and FFmpeg execution are bounded. Audio demuxers and file protocols are restricted. FastAPI URLs are administrator-controlled; only trusted admins should access the dashboard.
+- This is a single-instance application with file storage. For multiple workers/large audiences, move state/jobs to a database/queue and retain a single Telegram update consumer.
+
+## API
+
+Log in with `POST /api/auth/login` and `{ "password": "..." }`; reuse the session cookie. Errors use `{ "error": "..." }` and meaningful HTTP status codes.
+
+| Method     | Route                     | Purpose                                                                                                                       |
+| ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| GET        | `/healthz`                | Public process health, without settings/secrets.                                                                              |
+| GET        | `/api/auth/session`       | Check login.                                                                                                                  |
+| POST       | `/api/auth/logout`        | Revoke session.                                                                                                               |
+| GET / POST | `/api/bot/config`         | Read masked settings/status or save a validated partial configuration. `clearSecrets` explicitly removes credentials.         |
+| POST       | `/api/bot/restart`        | Restart an enabled worker after resolving a conflict.                                                                         |
+| GET        | `/api/bot/audience`       | Directory, preferences, member counts and analytics. Member counts are best-effort and updated at most hourly.                |
+| PATCH      | `/api/bot/audience/:id`   | Set `enabled`, `language`, or `clearHistory: true`. Paused chats are counted but not transcribed or buffered.                 |
+| POST       | `/api/bot/verify-chatgpt` | Optional `apiKey`, otherwise saved key. Returns models and latency without credentials.                                       |
+| POST       | `/api/bot/test-summary`   | Optional `config` override. Summarizes sample Persian messages and returns text, provider, model, fallback flag and duration. |
+| POST       | `/api/transcode`          | Multipart `audio`, optional `language`. Returns transcript, timing, engine, duration and WAV base64.                          |
+| GET        | `/api/events`             | SSE `snapshot` / `log` events, 200 events retained in memory.                                                                 |
+
+## Deployment to 46.8.231.179
+
+GitHub is connected to `alimahvashm/TelegramBot`. The deployment workflow publishes the latest `main` on pushes and a 15-minute retry schedule **after deployment is enabled**. GitHub schedules can be delayed; public-repository schedules may be disabled after 60 days without activity. The workflow builds and tests before deploying.
+
+One-time server setup:
+
+1. Install Docker Engine and Docker Compose using the official Docker instructions. Allow SSH from GitHub runners. Configure an HTTPS reverse proxy; `deploy/Caddyfile.example` provides a Caddy configuration.
+2. Create `/opt/telegrambot/shared/.env` with a strong `ADMIN_PASSWORD`, `APP_ORIGIN`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`, and optional bootstrap provider credentials. Restrict it with `chmod 600`. State is stored in `/opt/telegrambot/shared/data`.
+3. Install a dedicated deployment public key in `/root/.ssh/authorized_keys`. Do not upload your personal SSH key to GitHub. Verify the server host-key fingerprint through a trusted console before saving its known-hosts entry.
+4. In GitHub **Settings → Secrets and variables → Actions**, configure:
+
+| Type     | Name                 | Value                                                               |
+| -------- | -------------------- | ------------------------------------------------------------------- |
+| Secret   | `DEPLOY_SSH_KEY`     | Dedicated deployment private key.                                   |
+| Secret   | `DEPLOY_KNOWN_HOSTS` | Verified SSH host-key entry (`[host]:port` for a non-default port). |
+| Variable | `DEPLOY_PORT`        | Defaults to `22`.                                                   |
+| Variable | `DEPLOY_ENABLED`     | `true` after server setup and secrets are complete.                 |
+
+Files are uploaded to `/opt/telegrambot/releases/<commit>`. `deploy/server-deploy.sh` builds the image before stopping the old bot, starts one container, waits for health, and then switches `/opt/telegrambot/current`. It restores the previous image if the new container fails its health check. Releases, images and state are retained; schedule backups and removal of old unused releases/images. Image rollback does not roll back data: take a backup before future schema migrations.
+
+The container runs as UID 1000, exposes port 3000 on server loopback only, and uses a read-only root filesystem, writable data mount, temporary filesystem and resource limits. Inside Docker, `127.0.0.1` refers to the container: configure a reachable private address for an external Whisper service.
+
+Deployment **remains disabled until SSH access and GitHub secrets are configured**. The server was unreachable during initial setup; no live-server deployment has been verified.
+
+## Validation
+
+```sh
+npm run build
+npm test
+# Requires Google Chrome and FFmpeg; uses isolated state and a local mock ASR provider.
+npm run test:browser
+```
+
+Tests cover secrets, sessions, API access, cross-origin protection, persistence, history caps, summary fallback, Telegram conflicts, actual FFmpeg conversion and input rejection. Audio tests explicitly skip when FFmpeg is missing. Browser checks cover login, settings persistence, microphone recording, transcription through a local test provider, responsive layouts, and logout. External provider quality, billing, and real Telegram delivery require credentials and a live smoke test.
+
+Reference contracts: [Telegram Bot API](https://core.telegram.org/bots/api), [OpenAI models API](https://developers.openai.com/api/reference/resources/models/methods/list), [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat), [OpenRouter authentication](https://openrouter.ai/docs/api_reference/authentication), [Gemini audio](https://ai.google.dev/gemini-api/docs/audio), [GitHub schedules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).

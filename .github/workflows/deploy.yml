@@ -18,7 +18,7 @@ jobs:
   deploy:
     if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     env:
       DEPLOY_HOST: 46.8.231.179
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
@@ -26,6 +26,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate application before deployment
+        run: |
+          npm ci
+          npm run build
+          npm test
 
       - name: Configure SSH
         env:
@@ -54,7 +65,7 @@ jobs:
           git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "mkdir -p '$release'"
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "tar -xf - -C '$release'" < "$RUNNER_TEMP/source.tar"
-          ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "ln -sfn '$release' '/opt/telegrambot/current.next' && mv -Tf '/opt/telegrambot/current.next' '/opt/telegrambot/current'"
+          ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "bash '$release/deploy/server-deploy.sh' '$release'"
 
       - name: Remove SSH credentials
         if: always()

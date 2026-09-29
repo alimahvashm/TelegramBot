@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+dist
+data
+bot_config.json
+chat_history.json
+test-results
+playwright-report
+*.log
