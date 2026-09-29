@@ -3,7 +3,7 @@ import type { Config } from '../shared/config.js';
 import { summaryCount } from '../shared/config.js';
 import { AudioService, MAX_BYTES, MAX_SECONDS } from './audio.js';
 import { AppError, boundedBody, delay, fetchJson } from './http.js';
-import { summarize } from './providers.js';
+import { createEducationNotes, summarize } from './providers.js';
 import { Store, type Chat } from './store.js';
 
 type User = {
@@ -24,6 +24,7 @@ type Message = {
   sender_chat?: { title?: string };
   text?: string;
   caption?: string;
+  reply_to_message?: Message;
   voice?: Media;
   audio?: Media;
   video_note?: Media;
@@ -48,6 +49,7 @@ export class TelegramBot {
   private controller?: AbortController;
   private running?: Promise<void>;
   private controls = Promise.resolve();
+  private educationTimes = new Map<string, number>();
   private summaryTimes = new Map<string, number>();
   constructor(
     private store: Store,
@@ -228,6 +230,10 @@ export class TelegramBot {
         } else await this.reply(token, message, 'Use /language fa-IR or /language en-US.');
         return;
       }
+      if (command === 'education') {
+        await this.education(token, message, chat, config);
+        return;
+      }
       if (command === 'summary') {
         await this.summary(token, message, chat, config, argument?.trim());
         return;
@@ -256,32 +262,15 @@ export class TelegramBot {
     this.store.log('info', `Incoming audio in chat ${chat.id}.`);
     let transcription: string;
     try {
-      if ((media.file_size || 0) > MAX_BYTES || (media.duration || 0) > MAX_SECONDS)
-        throw new AppError('Audio must be under 20 MB and 3 minutes.', 413);
-      const file = await this.call<{ file_path?: string; file_size?: number }>(token, 'getFile', {
-        file_id: media.file_id,
-      });
-      if (!file.file_path || (file.file_size || 0) > MAX_BYTES)
-        throw new AppError('Telegram file is unavailable or exceeds 20 MB.', 413);
-      const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
-        signal: AbortSignal.timeout(30000),
-        redirect: 'error',
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new AppError('Telegram audio download failed.', 502);
-      }
-      const result = await this.audio.process(
-        await boundedBody(response, MAX_BYTES),
-        config,
-        chat.language,
-      );
-      transcription = result.text;
+      transcription = await this.transcribeMedia(token, media, config, chat.language);
       remember([text, `[Voice transcript] ${transcription}`].filter(Boolean).join('\n'));
       this.store.state.metrics.succeeded++;
     } catch (error) {
       this.store.state.metrics.failed++;
-      this.store.log('warn', `Audio processing failed in chat ${chat.id} (${config.transcribeMode}${error instanceof AppError ? `, HTTP ${error.status}` : ", network or runtime error"}).`);
+      this.store.log(
+        'warn',
+        `Audio processing failed in chat ${chat.id} (${config.transcribeMode}${error instanceof AppError ? `, HTTP ${error.status}` : ', network or runtime error'}).`,
+      );
       if (config.autoReply)
         await this.reply(
           token,
@@ -297,6 +286,94 @@ export class TelegramBot {
       this.store.log('info', `Transcript reply delivered to chat ${chat.id}.`);
     }
   }
+  private async transcribeMedia(
+    token: string,
+    media: Media,
+    config: Config,
+    language: Config['language'],
+  ) {
+    if ((media.file_size || 0) > MAX_BYTES || (media.duration || 0) > MAX_SECONDS)
+      throw new AppError('Audio must be under 20 MB and 3 minutes.', 413);
+    const file = await this.call<{ file_path?: string; file_size?: number }>(token, 'getFile', {
+      file_id: media.file_id,
+    });
+    if (!file.file_path || (file.file_size || 0) > MAX_BYTES)
+      throw new AppError('Telegram file is unavailable or exceeds 20 MB.', 413);
+    const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
+      signal: AbortSignal.timeout(30000),
+      redirect: 'error',
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new AppError('Telegram audio download failed.', 502);
+    }
+    const result = await this.audio.process(
+      await boundedBody(response, MAX_BYTES),
+      config,
+      language,
+    );
+    return result.text;
+  }
+
+  private async education(token: string, message: Message, chat: Chat, config: Config) {
+    const source = message.reply_to_message;
+    const media = source?.voice || source?.audio || source?.video_note;
+    if (!media) {
+      await this.reply(
+        token,
+        message,
+        '📚 برای ساخت جزوه، روی پیام صوتی استاد ریپلای کنید و /education را بفرستید.',
+      );
+      return;
+    }
+    if (Date.now() - (this.educationTimes.get(chat.id) || 0) < 30000) {
+      await this.reply(token, message, 'لطفاً بین درخواست‌های جزوه ۳۰ ثانیه صبر کنید.');
+      return;
+    }
+    this.educationTimes.set(chat.id, Date.now());
+    for (const [id, time] of this.educationTimes)
+      if (Date.now() - time > 60000) this.educationTimes.delete(id);
+    const progress = await this.call<{ message_id: number }>(token, 'sendMessage', {
+      chat_id: message.chat.id,
+      text: '⏳ در حال تبدیل صوت به متن و آماده‌سازی جزوه…',
+      reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+    });
+    let output: string;
+    let stage = 'transcription';
+    this.store.state.metrics.processed++;
+    try {
+      const transcript = await this.transcribeMedia(token, media, config, chat.language);
+      this.store.state.metrics.succeeded++;
+      stage = 'education';
+      const result = await createEducationNotes(config, transcript, (msg) =>
+        this.store.log('warn', msg),
+      );
+      output = result.text;
+      this.store.log('info', `Education notes generated using ${result.provider}.`);
+    } catch (error) {
+      if (stage === 'transcription') this.store.state.metrics.failed++;
+      this.store.log(
+        'warn',
+        `Education ${stage} failed${error instanceof AppError ? ` (HTTP ${error.status})` : ''}.`,
+      );
+      output =
+        stage === 'education'
+          ? 'تهیهٔ جزوه موقتاً ممکن نیست. لطفاً دسترسی و سهمیهٔ مدل هوش مصنوعی را بررسی کنید و دوباره تلاش کنید.'
+          : error instanceof AppError && error.status === 413
+            ? 'فایل صوتی باید حداکثر ۳ دقیقه و کمتر از ۲۰ مگابایت باشد.'
+            : error instanceof AppError && error.status === 422
+              ? 'گفتار واضحی تشخیص داده نشد یا فایل صوتی قابل خواندن نیست. لطفاً صدای واضح‌تری بفرستید.'
+              : 'تبدیل صوت به متن موقتاً ممکن نیست. لطفاً دوباره تلاش کنید.';
+    }
+    const parts = chunks(output);
+    await this.call(token, 'editMessageText', {
+      chat_id: message.chat.id,
+      message_id: progress.message_id,
+      text: parts[0],
+    });
+    for (const part of parts.slice(1)) await this.reply(token, message, part);
+  }
+
   private async summary(
     token: string,
     message: Message,
