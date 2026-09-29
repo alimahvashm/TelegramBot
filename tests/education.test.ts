@@ -110,7 +110,7 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   assert.equal(calls.find((c) => c.method === 'getFile')?.body.file_id, 'target-voice');
   const output = calls.filter(
     (c) =>
-      c.method === 'editMessageText' ||
+      (c.method === 'editMessageText' && !String(c.body.text).startsWith('📝')) ||
       (c.method === 'sendMessage' &&
         c.body.text !== '⏳ در حال تبدیل صوت به متن و آماده‌سازی جزوه…'),
   );
@@ -124,9 +124,9 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   await handle(2);
   assert.equal(modelCalls, 1);
   assert.match(String(calls.at(-1)?.body.text), /۳۰ ثانیه/);
-  await handle(3, { reply_to_message: { ...voice, voice: { file_id: 'large', duration: 181 } } });
+  await handle(3, { reply_to_message: { ...voice, voice: { file_id: 'large', duration: 3601 } } });
   assert.equal(audioMock.mock.callCount(), 1);
-  assert.match(String(calls.at(-1)?.body.text), /۳ دقیقه/);
+  assert.match(String(calls.at(-1)?.body.text), /۶۰ دقیقه/);
   failModel = true;
   await handle(4);
   assert.match(String(calls.at(-1)?.body.text), /سهمیه/);
@@ -142,4 +142,22 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   assert.equal(calls.length, count);
   await handle(6, { text: '/education@otherbot' });
   assert.equal(modelCalls, 2);
+});
+
+test('long lecture notes cover every section without a final truncating summary', async (t) => {
+  const input = 'موضوع درس و توضیحات استاد.\n'.repeat(2400) + 'پایان تدریس';
+  const received: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(String(options.body));
+    received.push(JSON.parse(body.messages[1].content.split('\n').slice(1).join('\n')));
+    return Response.json({ choices: [{ message: { content: `notes ${received.length}` } }] });
+  });
+  const result = await createEducationNotes(
+    configSchema.parse({ llmBrain: 'chatgpt', chatGptApiKey: 'test-key' }),
+    input,
+  );
+  assert.equal(received.join(''), input);
+  assert.ok(received.length > 3);
+  assert.ok(received.every((s) => s.length <= 12001));
+  assert.ok(result.text.endsWith(`notes ${received.length}`));
 });

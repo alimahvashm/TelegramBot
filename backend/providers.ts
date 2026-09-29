@@ -3,7 +3,10 @@ import type { Config } from '../shared/config.js';
 import type { HistoryMessage } from './store.js';
 import { AppError, boundedBody, fetchJson, withRetry } from './http.js';
 
-type Completion = { choices?: { message?: { content?: string } }[]; error?: unknown };
+type Completion = {
+  choices?: { message?: { content?: string }; finish_reason?: string }[];
+  error?: unknown;
+};
 export async function summarize(
   config: Config,
   messages: HistoryMessage[],
@@ -41,17 +44,41 @@ export async function createEducationNotes(
   config: Config,
   transcript: string,
   log: (message: string) => void = () => {},
+  progress?: (done: number, total: number) => Promise<void>,
 ) {
   if (!transcript.trim()) throw new AppError('No lecture transcript is available.', 422);
-  if (transcript.length > 30000) throw new AppError('Lecture transcript is too long.', 413);
-  return generateText(
-    config,
-    EDUCATION_PROMPT,
-    `متن پیاده‌شدهٔ تدریس:\n${JSON.stringify(transcript)}`,
-    6000,
-    'education',
-    log,
-  );
+  if (transcript.length > 500000) throw new AppError('Lecture transcript is too long.', 413);
+  const sections: string[] = [];
+  let remaining = transcript;
+  while (remaining.length > 12000) {
+    const boundary = Math.max(
+      remaining.lastIndexOf('\n', 12000),
+      remaining.lastIndexOf(' ', 12000),
+    );
+    const end = boundary > 6000 ? boundary + 1 : 12000;
+    sections.push(remaining.slice(0, end));
+    remaining = remaining.slice(end);
+  }
+  if (remaining.trim()) sections.push(remaining);
+  const notes: string[] = [];
+  let last!: Awaited<ReturnType<typeof generateText>>;
+  const started = Date.now();
+  for (const [index, section] of sections.entries()) {
+    await progress?.(index, sections.length);
+    last = await generateText(
+      config,
+      EDUCATION_PROMPT +
+        (sections.length > 1
+          ? `\nاین بخش ${index + 1} از ${sections.length} بخش متوالی یک تدریس است. فقط جزوهٔ همین بخش را بنویس؛ مقدمه یا جمع‌بندی کل درس نساز. علامت‌های گفتار نامفهوم را به‌عنوان بخش نیازمند توضیح بیشتر حفظ کن.`
+          : ''),
+      `متن پیاده‌شدهٔ تدریس:\n${JSON.stringify(section)}`,
+      6000,
+      'education',
+      log,
+    );
+    notes.push(sections.length > 1 ? `📚 بخش ${index + 1}\n\n${last.text}` : last.text);
+  }
+  return { ...last, text: notes.join('\n\n──────────\n\n'), durationMs: Date.now() - started };
 }
 
 async function generateText(
@@ -118,6 +145,11 @@ async function generateText(
           ),
         1,
       );
+      if (task === 'education' && result.choices?.[0]?.finish_reason === 'length')
+        throw new AppError(
+          'The model truncated the notes. Please retry with a shorter lecture section.',
+          422,
+        );
       const text = result.choices?.[0]?.message?.content?.trim();
       if (!text) throw new AppError('Provider returned no summary.', 502);
       return {

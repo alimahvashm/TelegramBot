@@ -19,7 +19,7 @@ type Result = {
   engine: string;
   language: string;
   audioSeconds: number;
-  wavBase64: string;
+  wavBase64?: string;
 };
 function spectrum(samples: Float32Array): number[] {
   const size = 512;
@@ -158,7 +158,7 @@ export default function AudioLab({
     return () => URL.revokeObjectURL(object);
   }, [file]);
   useEffect(() => {
-    if (!result) {
+    if (!result?.wavBase64) {
       setWavUrl('');
       return;
     }
@@ -173,7 +173,7 @@ export default function AudioLab({
     return () => clearInterval(timer);
   }, [recording]);
   useEffect(() => {
-    if (recording && seconds >= 180) recorder.current?.stop();
+    if (recording && seconds >= 3600) recorder.current?.stop();
   }, [seconds, recording]);
   useEffect(() => {
     if (!busy) return;
@@ -331,7 +331,7 @@ export default function AudioLab({
           </span>
           <strong>Drop your audio here</strong>
           <span>or click to browse files</span>
-          <small>OGG, MP3, M4A, WAV, WEBM · up to 20 MB / 3 min</small>
+          <small>OGG, MP3, M4A, WAV, WEBM · up to 20 MB / 60 min</small>
         </button>
         <input
           aria-label="Upload audio file"
@@ -469,10 +469,12 @@ export default function AudioLab({
                 {copied ? <Check size={16} /> : <Copy size={16} />}{' '}
                 {copied ? 'Copied' : 'Copy text'}
               </button>
-              <a className="button secondary" href={wavUrl} download="transcoded-16khz.wav">
-                <Download size={16} />
-                Download WAV
-              </a>
+              {wavUrl && (
+                <a className="button secondary" href={wavUrl} download="transcoded-16khz.wav">
+                  <Download size={16} />
+                  Download WAV
+                </a>
+              )}
             </div>
             <p className="footnote">
               16 kHz · 16-bit PCM · mono · {result.audioSeconds.toFixed(1)} seconds

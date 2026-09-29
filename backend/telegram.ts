@@ -291,9 +291,10 @@ export class TelegramBot {
     media: Media,
     config: Config,
     language: Config['language'],
+    progress?: (done: number, total: number) => Promise<void>,
   ) {
     if ((media.file_size || 0) > MAX_BYTES || (media.duration || 0) > MAX_SECONDS)
-      throw new AppError('Audio must be under 20 MB and 3 minutes.', 413);
+      throw new AppError('Audio must be under 20 MB and 60 minutes.', 413);
     const file = await this.call<{ file_path?: string; file_size?: number }>(token, 'getFile', {
       file_id: media.file_id,
     });
@@ -311,6 +312,8 @@ export class TelegramBot {
       await boundedBody(response, MAX_BYTES),
       config,
       language,
+      false,
+      progress,
     );
     return result.text;
   }
@@ -342,11 +345,31 @@ export class TelegramBot {
     let stage = 'transcription';
     this.store.state.metrics.processed++;
     try {
-      const transcript = await this.transcribeMedia(token, media, config, chat.language);
+      const updateProgress = async (text: string) => {
+        await this.call(token, 'editMessageText', {
+          chat_id: message.chat.id,
+          message_id: progress.message_id,
+          text,
+        }).catch(() => {});
+      };
+      const transcript = await this.transcribeMedia(
+        token,
+        media,
+        config,
+        chat.language,
+        async (done, total) => {
+          await updateProgress(`⏳ تبدیل صوت به متن: ${done} از ${total} بخش تکمیل شد.`);
+        },
+      );
       this.store.state.metrics.succeeded++;
       stage = 'education';
-      const result = await createEducationNotes(config, transcript, (msg) =>
-        this.store.log('warn', msg),
+      const result = await createEducationNotes(
+        config,
+        transcript,
+        (msg) => this.store.log('warn', msg),
+        async (done, total) => {
+          await updateProgress(`📝 آماده‌سازی جزوه: بخش ${done + 1} از ${total}`);
+        },
       );
       output = result.text;
       this.store.log('info', `Education notes generated using ${result.provider}.`);
@@ -360,7 +383,7 @@ export class TelegramBot {
         stage === 'education'
           ? 'تهیهٔ جزوه موقتاً ممکن نیست. لطفاً دسترسی و سهمیهٔ مدل هوش مصنوعی را بررسی کنید و دوباره تلاش کنید.'
           : error instanceof AppError && error.status === 413
-            ? 'فایل صوتی باید حداکثر ۳ دقیقه و کمتر از ۲۰ مگابایت باشد.'
+            ? 'فایل صوتی باید حداکثر ۶۰ دقیقه و کمتر از ۲۰ مگابایت باشد.'
             : error instanceof AppError && error.status === 422
               ? 'گفتار واضحی تشخیص داده نشد یا فایل صوتی قابل خواندن نیست. لطفاً صدای واضح‌تری بفرستید.'
               : 'تبدیل صوت به متن موقتاً ممکن نیست. لطفاً دوباره تلاش کنید.';
@@ -371,7 +394,10 @@ export class TelegramBot {
       message_id: progress.message_id,
       text: parts[0],
     });
-    for (const part of parts.slice(1)) await this.reply(token, message, part);
+    for (const part of parts.slice(1)) {
+      await delay(3100);
+      await this.reply(token, message, part);
+    }
   }
 
   private async summary(

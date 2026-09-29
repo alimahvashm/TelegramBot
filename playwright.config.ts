@@ -24,6 +24,8 @@ export default defineConfig({
     reuseExistingServer: false,
     env: {
       PORT: '4174',
+      APP_ORIGIN: 'http://127.0.0.1:4174',
+      COOKIE_SECURE: 'false',
       HOST: '127.0.0.1',
       ADMIN_PASSWORD: 'browser-test-password-only',
       DATA_DIR: mkdtempSync(path.join(tmpdir(), 'voice-studio-browser-')),
