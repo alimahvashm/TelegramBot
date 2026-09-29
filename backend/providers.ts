@@ -171,17 +171,15 @@ export async function transcribe(
     );
     text = result.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
   } else {
-    if (!config.googleSpeechApiKey || !flacPath)
-      throw new AppError(
-        'Google Chromium ASR requires a compatible Speech API key. Configure it or select FastAPI / Gemini.',
-        503,
-      );
+    if (!flacPath) throw new AppError('Google ASR requires FLAC audio.', 500);
     const flac = await readFile(flacPath);
     const url = new URL('https://www.google.com/speech-api/v2/recognize');
     url.search = new URLSearchParams({
-      output: 'json',
+      client: 'chromium',
       lang: language,
-      key: config.googleSpeechApiKey,
+      // Public compatibility key used by SpeechRecognition and the supplied google_asr.py.
+      key: config.googleSpeechApiKey || 'AIzaSyBOti4mM-6x9WDnZIjIeyEU21OpBXqWBgw',
+      pFilter: '0',
     }).toString();
     text = await withRetry(async () => {
       const response = await fetch(url, {
@@ -193,18 +191,26 @@ export async function transcribe(
       });
       if (!response.ok) {
         await response.body?.cancel();
-        throw new AppError(`Google ASR returned HTTP ${response.status}.`, response.status);
+        throw new AppError(
+          `Google ASR returned HTTP ${response.status}.`,
+          response.status,
+          Math.min(15, Number(response.headers.get('retry-after')) || 0),
+        );
       }
       const lines = (await boundedBody(response)).toString().trim().split('\n').filter(Boolean);
-      return lines
-        .flatMap((line) => {
-          const parsed = JSON.parse(line) as {
-            result?: { alternative?: { transcript?: string }[] }[];
-          };
-          return (parsed.result || []).map((r) => r.alternative?.[0]?.transcript || '');
-        })
-        .filter(Boolean)
-        .join(' ');
+      try {
+        return lines
+          .flatMap((line) => {
+            const parsed = JSON.parse(line) as {
+              result?: { alternative?: { transcript?: string }[] }[];
+            };
+            return (parsed.result || []).map((r) => r.alternative?.[0]?.transcript || '');
+          })
+          .filter((value) => typeof value === 'string' && value.trim())
+          .join(' ');
+      } catch {
+        throw new AppError('Google ASR returned an invalid recognition response.', 502);
+      }
     });
   }
   if (typeof text !== 'string' || !text.trim())

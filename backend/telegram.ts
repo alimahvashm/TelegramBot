@@ -281,7 +281,7 @@ export class TelegramBot {
       this.store.state.metrics.succeeded++;
     } catch (error) {
       this.store.state.metrics.failed++;
-      this.store.log('warn', `Audio processing failed in chat ${chat.id}.`);
+      this.store.log('warn', `Audio processing failed in chat ${chat.id} (${config.transcribeMode}${error instanceof AppError ? `, HTTP ${error.status}` : ", network or runtime error"}).`);
       if (config.autoReply)
         await this.reply(
           token,

@@ -102,11 +102,7 @@ export function createApp(store: Store, bot: TelegramBot, audio: AudioService, p
     readiness: {
       cloud: !!store.config.openRouterApiKey,
       openai: !!store.config.chatGptApiKey,
-      asr:
-        store.config.transcribeMode === 'fastapi' ||
-        !!(store.config.transcribeMode === 'gemini'
-          ? store.config.geminiApiKey
-          : store.config.googleSpeechApiKey),
+      asr: store.config.transcribeMode !== 'gemini' || !!store.config.geminiApiKey,
     },
   });
   app.get('/api/bot/config', (_req, res) => res.json(snapshot()));

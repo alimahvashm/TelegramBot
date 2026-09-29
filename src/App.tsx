@@ -682,14 +682,14 @@ function Dashboard({ logout }: { logout: () => void }) {
                   {config.transcribeMode === 'google_asr' && (
                     <>
                       <Secret
-                        label="Google Speech API key"
+                        label="Google Speech API key (optional override)"
                         value={config.googleSpeechApiKey}
                         saved={saved('googleSpeechApiKey')}
                         onChange={(v) => change('googleSpeechApiKey', v)}
                         onClear={() => clear('googleSpeechApiKey')}
                       />
                       <p className="field-help">
-                        This legacy Chromium endpoint needs a compatible key and may be unavailable.
+                        Uses the default SpeechRecognition compatibility key when blank. This legacy endpoint may be unavailable.
                         FastAPI and Gemini are alternatives.
                       </p>
                     </>
