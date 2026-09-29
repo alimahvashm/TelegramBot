@@ -1,0 +1,52 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_HOST: 46.8.231.179
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Upload tracked code
+        run: |
+          set -euo pipefail
+          ssh_options=(-i "$HOME/.ssh/deploy_key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          release="/opt/telegrambot/releases/$GITHUB_SHA"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
+          ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "mkdir -p '$release'"
+          ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "tar -xf - -C '$release'" < "$RUNNER_TEMP/source.tar"
+          ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "ln -sfn '$release' '/opt/telegrambot/current.next' && mv -Tf '/opt/telegrambot/current.next' '/opt/telegrambot/current'"
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
