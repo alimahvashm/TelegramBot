@@ -17,8 +17,10 @@ if [[ "$previous" =~ ^/opt/telegrambot/releases/[0-9a-f]{40}$ ]]; then
   previous_image="telegrambot:${previous##*/}"
 fi
 
-# Build before stopping the live bot. Never run two pollers together.
-docker build --tag "$DEPLOY_IMAGE" "$release"
+# GitHub Actions uploads a tested image. A manual source-only deployment can still build here.
+if ! docker image inspect "$DEPLOY_IMAGE" >/dev/null 2>&1; then
+  docker build --tag "$DEPLOY_IMAGE" "$release"
+fi
 "${compose[@]}" stop --timeout 240
 if "${compose[@]}" up -d --wait --wait-timeout 120; then
   ln -sfn "$release" /opt/telegrambot/current.next
