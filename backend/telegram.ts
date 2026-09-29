@@ -4,6 +4,7 @@ import { summaryCount } from '../shared/config.js';
 import { AudioService, MAX_BYTES, MAX_SECONDS } from './audio.js';
 import { AppError, boundedBody, delay, fetchJson } from './http.js';
 import { createEducationNotes, summarize } from './providers.js';
+import { renderEducationPdf } from './education-pdf.js';
 import { Store, type Chat } from './store.js';
 
 type User = {
@@ -54,6 +55,7 @@ export class TelegramBot {
   constructor(
     private store: Store,
     private audio: AudioService,
+    private pdfRenderer: (notes: string) => Promise<Buffer> = renderEducationPdf,
   ) {}
   async call<T>(
     token: string,
@@ -157,6 +159,32 @@ export class TelegramBot {
         text: part,
         reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
       });
+  }
+  private async sendPdf(token: string, message: Message, pdf: Buffer) {
+    const form = new FormData();
+    form.append('chat_id', String(message.chat.id));
+    form.append('caption', '📚 جزوهٔ آموزشی');
+    form.append(
+      'reply_parameters',
+      JSON.stringify({
+        message_id: message.message_id,
+        allow_sending_without_reply: true,
+      }),
+    );
+    form.append(
+      'document',
+      new Blob([new Uint8Array(pdf)], { type: 'application/pdf' }),
+      'education-notes.pdf',
+    );
+    const result = await fetchJson<{ ok: boolean }>(
+      `https://api.telegram.org/bot${token}/sendDocument`,
+      {
+        method: 'POST',
+        body: form,
+      },
+      120000,
+    );
+    if (!result.ok) throw new AppError('Telegram did not accept the PDF document.', 502);
   }
   private chat(message: Message, config: Config): Chat {
     const id = String(message.chat.id);
@@ -342,6 +370,7 @@ export class TelegramBot {
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
     let output: string;
+    let notesReady = false;
     let stage = 'transcription';
     this.store.state.metrics.processed++;
     try {
@@ -372,6 +401,7 @@ export class TelegramBot {
         },
       );
       output = result.text;
+      notesReady = true;
       this.store.log('info', `Education notes generated using ${result.provider}.`);
     } catch (error) {
       if (stage === 'transcription') this.store.state.metrics.failed++;
@@ -388,16 +418,30 @@ export class TelegramBot {
               ? 'گفتار واضحی تشخیص داده نشد یا فایل صوتی قابل خواندن نیست. لطفاً صدای واضح‌تری بفرستید.'
               : 'تبدیل صوت به متن موقتاً ممکن نیست. لطفاً دوباره تلاش کنید.';
     }
-    const parts = chunks(output);
+    if (notesReady) {
+      try {
+        await this.call(token, 'editMessageText', {
+          chat_id: message.chat.id,
+          message_id: progress.message_id,
+          text: '📄 در حال آماده‌سازی فایل PDF…',
+        }).catch(() => {});
+        await this.sendPdf(token, message, await this.pdfRenderer(output));
+        this.store.log('info', `Education PDF delivered to chat ${chat.id}.`);
+        output = '📄 جزوهٔ آموزشی به صورت PDF ارسال شد.';
+      } catch (error) {
+        this.store.log(
+          'warn',
+          `Education PDF failed${error instanceof AppError ? ` (HTTP ${error.status})` : ''}.`,
+        );
+        output =
+          'ساخت یا ارسال PDF ممکن نشد. لطفاً دوباره تلاش کنید یا از مدیر ربات بخواهید سرویس PDF را بررسی کند.';
+      }
+    }
     await this.call(token, 'editMessageText', {
       chat_id: message.chat.id,
       message_id: progress.message_id,
-      text: parts[0],
+      text: output,
     });
-    for (const part of parts.slice(1)) {
-      await delay(3100);
-      await this.reply(token, message, part);
-    }
   }
 
   private async summary(

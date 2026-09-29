@@ -118,6 +118,8 @@ Reference contracts: [Telegram Bot API](https://core.telegram.org/bots/api), [Op
 
 ### Lecture notes
 
-Reply to a voice message, audio file, or video note with `/education` (or `/education@YourBot`). The bot transcribes that specific recording and uses the configured summary model to create readable Persian study notes, correcting spelling and organization while preserving the lecture’s content and marking unclear passages. Long notes are split across Telegram messages. This command also works when automatic transcript replies are disabled. Current audio limits remain 60 minutes / 20 MB, with a 30-second per-chat request cooldown.
+Reply to a voice message, audio file, or video note with `/education` (or `/education@YourBot`). The bot transcribes that specific recording and uses the configured summary model to create readable Persian study notes, correcting spelling and organization while preserving the lecture’s content and marking unclear passages. It sends the completed notes as an A4 PDF with embedded B Nazanin text, bold B Nazanin headings, right-to-left layout, and page numbers. This command also works when automatic transcript replies are disabled. Current audio limits remain 60 minutes / 20 MB, with a 30-second per-chat request cooldown.
+
+The production image includes WeasyPrint and the B Nazanin regular and bold fonts used for PDF rendering. Install WeasyPrint locally if you run the bot outside Docker.
 
 Long recordings are decoded and transcribed sequentially in 60-second segments. Unrecognized segments are explicitly marked; provider failures abort the job rather than returning incomplete notes. Long education transcripts are processed in ordered sections and assembled without a lossy final summary. WAV download is available only for recordings up to 60 seconds. Telegram cloud downloads still require files no larger than 20 MB.

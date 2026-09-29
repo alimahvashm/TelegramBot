@@ -9,6 +9,7 @@ import { TelegramBot } from '../backend/telegram.js';
 import { AppError } from '../backend/http.js';
 import { configSchema } from '../shared/config.js';
 import { createEducationNotes } from '../backend/providers.js';
+import { educationHtml } from '../backend/education-pdf.js';
 
 test('education uses the configured model and keeps the complete lecture separate from instructions', async (t) => {
   const transcript = 'متن تدریس '.repeat(500) + 'نکتهٔ پایانی';
@@ -71,6 +72,16 @@ test('reply education transcribes the target, delivers long notes, enforces limi
         : Response.json({ choices: [{ message: { content: notes } }] });
     }
     if (url.includes('/file/bot')) return new Response(new Uint8Array([1, 2, 3]));
+    if (url.endsWith('/sendDocument')) {
+      const form = options?.body as FormData;
+      const document = form.get('document') as File;
+      assert.equal(document.name, 'education-notes.pdf');
+      assert.equal(document.type, 'application/pdf');
+      assert.equal(Buffer.from(await document.arrayBuffer()).toString(), '%PDF-test');
+      assert.equal(JSON.parse(String(form.get('reply_parameters'))).message_id, 20);
+      calls.push({ method: 'sendDocument', body: { document: document.name } });
+      return Response.json({ ok: true, result: { message_id: 901 } });
+    }
     const method = url.split('/').at(-1)!;
     const body = JSON.parse(String(options?.body));
     calls.push({ method, body });
@@ -79,7 +90,11 @@ test('reply education transcribes the target, delivers long notes, enforces limi
       result: method === 'getFile' ? { file_path: 'voice/target.ogg' } : { message_id: 900 },
     });
   });
-  const bot = new TelegramBot(store, audio);
+  const pdfInputs: string[] = [];
+  const bot = new TelegramBot(store, audio, async (text) => {
+    pdfInputs.push(text);
+    return Buffer.from('%PDF-test');
+  });
   bot.status.bot = { id: 1, first_name: 'Test', username: 'testbot' };
   const base = {
     message_id: 20,
@@ -108,21 +123,12 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   assert.equal(audioMock.mock.callCount(), 1);
   assert.equal(modelCalls, 1);
   assert.equal(calls.find((c) => c.method === 'getFile')?.body.file_id, 'target-voice');
-  const output = calls.filter(
-    (c) =>
-      (c.method === 'editMessageText' && !String(c.body.text).startsWith('📝')) ||
-      (c.method === 'sendMessage' &&
-        c.body.text !== '⏳ در حال تبدیل صوت به متن و آماده‌سازی جزوه…'),
-  );
-  assert.equal(output.map((c) => c.body.text).join(''), notes.trim());
-  assert.ok(output.every((c) => Array.from(c.body.text).length <= 3900));
-  assert.ok(
-    output
-      .filter((c) => c.method === 'sendMessage')
-      .every((c) => c.body.reply_parameters.message_id === 20),
-  );
+  assert.deepEqual(pdfInputs, [notes.trim()]);
+  assert.equal(calls.filter((c) => c.method === 'sendDocument').length, 1);
+  assert.match(String(calls.at(-1)?.body.text), /PDF ارسال شد/);
   await handle(2);
   assert.equal(modelCalls, 1);
+  assert.equal(pdfInputs.length, 1);
   assert.match(String(calls.at(-1)?.body.text), /۳۰ ثانیه/);
   await handle(3, { reply_to_message: { ...voice, voice: { file_id: 'large', duration: 3601 } } });
   assert.equal(audioMock.mock.callCount(), 1);
@@ -136,12 +142,24 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   await handle(5);
   assert.match(String(calls.at(-1)?.body.text), /گفتار واضحی/);
   assert.equal(modelCalls, 2);
+  assert.equal(pdfInputs.length, 1);
   store.state.chats['2'].enabled = false;
   const count = calls.length;
   await handle(2);
   assert.equal(calls.length, count);
   await handle(6, { text: '/education@otherbot' });
   assert.equal(modelCalls, 2);
+});
+
+test('education PDF markup escapes model text and uses B Nazanin with bold RTL headings', () => {
+  const html = educationHtml('عنوان درس\n\nنکتهٔ اصلی\n\nمتن <script>alert(1)</script> و & بیشتر.');
+  assert.match(html, /<html lang="fa" dir="rtl">/);
+  assert.match(html, /<h1>عنوان درس<\/h1>/);
+  assert.match(html, /<h2>نکتهٔ اصلی<\/h2>/);
+  assert.match(html, /font-weight: 700/);
+  assert.match(html, /font: 14pt\/1\.75 'B Nazanin'/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; و &amp; بیشتر/);
+  assert.doesNotMatch(html, /<script>/);
 });
 
 test('long lecture notes cover every section without a final truncating summary', async (t) => {
