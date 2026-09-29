@@ -55,8 +55,8 @@ export function educationHtml(notes: string) {
 <style>
 @font-face { font-family: 'B Nazanin'; src: url('file:///app/assets/fonts/BNazanin.ttf') format('truetype'); font-weight: 400; }
 @font-face { font-family: 'B Nazanin'; src: url('file:///app/assets/fonts/BNaznnBd.ttf') format('truetype'); font-weight: 700; }
-@page { size: A4; margin: 20mm 20mm 22mm; @bottom-center { content: counter(page); color: #64748b; font: 10pt 'B Nazanin'; } }
-body { direction: rtl; text-align: right; font: 14pt/1.75 'B Nazanin', serif; color: #202a3a; }
+@page { size: A4; margin: 20mm 20mm 22mm; background: #fff; @bottom-center { content: counter(page); color: #64748b; font: 10pt 'B Nazanin'; } }
+body { direction: rtl; text-align: right; font: 14pt/1.75 'B Nazanin', serif; color: #202a3a; background: #fff; }
 h1, h2 { font-family: 'B Nazanin', serif; font-weight: 700; line-height: 1.5; break-after: avoid; }
 h1 { font-size: 22pt; color: #17375e; margin: 0 0 12mm; padding-bottom: 4mm; border-bottom: 1px solid #cbd5e1; }
 h2 { font-size: 17pt; color: #24456f; margin: 8mm 0 3mm; }
