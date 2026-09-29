@@ -46,6 +46,10 @@ Only one process may poll a token. A data-directory lock prevents accidental loc
 
 Audio is limited to **20 MB and 3 minutes**, with at most two active conversions. WAV output is 16 kHz, 16-bit PCM, mono. The browser includes a real spectrogram, microphone waveform, text copy, and WAV download. Temporary server files are removed after processing. Dashboard transcripts are returned to the browser and are not saved in chat history.
 
+## Custom summary API
+
+Select **OpenAI / custom API**, set the API base URL (including `/v1`), enter the exact model identifier, and save its API key. Verification and completion requests both use that endpoint. Environment bootstrap supports `LLM_BRAIN=chatgpt`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, and `OPENAI_API_KEY`. The key belongs in the ignored `.env` or server settings, never Git.
+
 ## Persistence and security
 
 - `DATA_DIR` defaults to `./data`. `bot_config.json` stores settings and secrets with mode `0600`; the directory is `0700`. Secrets are **not encrypted at rest**. Protect the host and backups.
@@ -75,7 +79,7 @@ Log in with `POST /api/auth/login` and `{ "password": "..." }`; reuse the sessio
 | POST       | `/api/transcode`          | Multipart `audio`, optional `language`. Returns transcript, timing, engine, duration and WAV base64.                          |
 | GET        | `/api/events`             | SSE `snapshot` / `log` events, 200 events retained in memory.                                                                 |
 
-## Deployment to 46.8.231.179
+## Deployment to 109.248.160.162
 
 GitHub is connected to `alimahvashm/TelegramBot`. The deployment workflow publishes the latest `main` on pushes and a 15-minute retry schedule **after deployment is enabled**. GitHub schedules can be delayed; public-repository schedules may be disabled after 60 days without activity. The workflow builds and tests before deploying.
 
@@ -97,7 +101,7 @@ Files are uploaded to `/opt/telegrambot/releases/<commit>`. `deploy/server-deplo
 
 The container runs as UID 1000, exposes port 3000 on server loopback only, and uses a read-only root filesystem, writable data mount, temporary filesystem and resource limits. Inside Docker, `127.0.0.1` refers to the container: configure a reachable private address for an external Whisper service.
 
-Deployment **remains disabled until SSH access and GitHub secrets are configured**. The server was unreachable during initial setup; no live-server deployment has been verified.
+Deployment **remains disabled until SSH access and GitHub secrets are configured**. SSH access to the new server is verified. Provider credentials are configured locally, but server credential installation and GitHub deployment secrets still need to be completed; no live-server application deployment has been verified.
 
 ## Validation
 

@@ -168,8 +168,11 @@ export function createApp(store: Store, bot: TelegramBot, audio: AudioService, p
     res.json({ ok: true });
   });
   app.post('/api/bot/verify-chatgpt', expensiveLimiter, async (req, res) => {
-    const { apiKey } = z.object({ apiKey: z.string().max(512).optional() }).parse(req.body || {});
-    res.json(await verifyOpenAI(apiKey || store.config.chatGptApiKey));
+    const { apiKey, baseUrl } = z
+      .object({ apiKey: z.string().max(512).optional(), baseUrl: z.string().optional() })
+      .parse(req.body || {});
+    const config = mergeConfig(store.config, baseUrl ? { chatGptBaseUrl: baseUrl } : {});
+    res.json(await verifyOpenAI(apiKey || config.chatGptApiKey, config.chatGptBaseUrl));
   });
   let summaries = 0;
   app.post('/api/bot/test-summary', expensiveLimiter, async (req, res) => {

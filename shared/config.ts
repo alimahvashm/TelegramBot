@@ -29,6 +29,21 @@ export const configSchema = z.object({
     ),
   llmBrain: z.enum(['server_cloud', 'chatgpt']).default('server_cloud'),
   chatGptApiKey: key.default(''),
+  chatGptBaseUrl: z
+    .string()
+    .url()
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        ['http:', 'https:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+      );
+    }, 'Use an HTTP(S) API base URL without credentials, query or fragment')
+    .transform((v) => v.replace(/\/+$/, ''))
+    .default('https://api.openai.com/v1'),
   chatGptModel: z.string().trim().min(1).max(150).default('gpt-4o-mini'),
   openRouterApiKey: key.default(''),
   openRouterModel: z.string().trim().min(1).max(150).default('openrouter/free'),

@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      DEPLOY_HOST: 46.8.231.179
+      DEPLOY_HOST: 109.248.160.162
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
     steps:
       - uses: actions/checkout@v4

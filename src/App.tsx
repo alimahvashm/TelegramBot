@@ -373,7 +373,10 @@ function Dashboard({ logout }: { logout: () => void }) {
         latencyMs: number;
         models: string[];
         note: string;
-      }>('/api/bot/verify-chatgpt', { apiKey: config.chatGptApiKey || undefined });
+      }>('/api/bot/verify-chatgpt', {
+        apiKey: config.chatGptApiKey || undefined,
+        baseUrl: config.chatGptBaseUrl,
+      });
       setVerified(`Verified · ${data.latencyMs} ms`);
       setModels(data.models);
       setNotice({
@@ -393,12 +396,7 @@ function Dashboard({ logout }: { logout: () => void }) {
   const metrics = audience?.metrics;
   const active = snapshot?.status.state === 'polling';
   const choices = [
-    ...new Set([
-      'gpt-4o-mini',
-      'gpt-4o',
-      'chatgpt-4o-latest',
-      ...models.filter((m) => /^(gpt-|chatgpt-)/.test(m)),
-    ]),
+    ...new Set(['gpt-4o-mini', 'gpt-4o', 'chatgpt-4o-latest', config.chatGptModel, ...models]),
   ];
   const chats =
     audience?.chats.filter(
@@ -785,7 +783,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                       onClick={() => change('llmBrain', 'chatgpt')}
                     >
                       <Sparkles size={22} />
-                      <strong>OpenAI</strong>
+                      <strong>OpenAI / custom API</strong>
                       <span>Your key. Your models.</span>
                       <small className={snapshot?.readiness.openai ? 'ready' : ''}>
                         {snapshot?.readiness.openai ? 'Key configured' : 'Connect account'}
@@ -835,15 +833,27 @@ function Dashboard({ logout }: { logout: () => void }) {
                           </span>
                         )}
                       </div>
-                      <Field label="OpenAI model">
-                        <select
+                      <Field
+                        label="API base URL"
+                        hint="OpenAI or your OpenAI-compatible server, including /v1."
+                      >
+                        <input
+                          type="url"
+                          value={config.chatGptBaseUrl}
+                          onChange={(e) => change('chatGptBaseUrl', e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Summary model">
+                        <input
+                          list="summary-models"
                           value={config.chatGptModel}
                           onChange={(e) => change('chatGptModel', e.target.value)}
-                        >
+                        />
+                        <datalist id="summary-models">
                           {choices.map((model) => (
-                            <option key={model}>{model}</option>
+                            <option key={model} value={model} />
                           ))}
-                        </select>
+                        </datalist>
                       </Field>
                       <p className="field-help">
                         API billing is separate from a ChatGPT subscription. Model availability

@@ -11,19 +11,17 @@ export async function summarize(
 ) {
   if (!messages.length) throw new AppError('No messages are available to summarize yet.', 400);
   const transcript = JSON.stringify(
-    messages
-      .slice(-100)
-      .map((m) => ({
-        sender: m.sender,
-        time: new Date(m.timestamp).toISOString(),
-        text: m.text.slice(0, 2000),
-      })),
+    messages.slice(-100).map((m) => ({
+      sender: m.sender,
+      time: new Date(m.timestamp).toISOString(),
+      text: m.text.slice(0, 2000),
+    })),
   ).slice(0, 65000);
   const candidates: { provider: string; url: string; key: string; model: string }[] = [];
   if (config.llmBrain === 'chatgpt' && config.chatGptApiKey)
     candidates.push({
-      provider: 'OpenAI',
-      url: 'https://api.openai.com/v1/chat/completions',
+      provider: config.chatGptBaseUrl === 'https://api.openai.com/v1' ? 'OpenAI' : 'Custom API',
+      url: `${config.chatGptBaseUrl}/chat/completions`,
       key: config.chatGptApiKey,
       model: config.chatGptModel,
     });
@@ -81,7 +79,8 @@ export async function summarize(
         text,
         provider: candidate.provider,
         model: candidate.model,
-        fallback: index > 0 || (config.llmBrain === 'chatgpt' && candidate.provider !== 'OpenAI'),
+        fallback:
+          index > 0 || (config.llmBrain === 'chatgpt' && candidate.provider === 'OpenRouter'),
         durationMs: Date.now() - started,
       };
     } catch (error) {
@@ -96,12 +95,12 @@ export async function summarize(
   );
 }
 
-export async function verifyOpenAI(key: string) {
-  if (!key || !key.startsWith('sk-')) throw new AppError('Enter a valid OpenAI API key.', 400);
+export async function verifyOpenAI(key: string, baseUrl = 'https://api.openai.com/v1') {
+  if (!key) throw new AppError('Enter an API key.', 400);
   const started = Date.now();
   try {
     const result = await fetchJson<{ data: { id: string }[] }>(
-      'https://api.openai.com/v1/models',
+      `${baseUrl}/models`,
       { headers: { Authorization: `Bearer ${key}` } },
       15000,
     );
@@ -114,8 +113,8 @@ export async function verifyOpenAI(key: string) {
   } catch (error) {
     throw new AppError(
       error instanceof AppError && error.status === 401
-        ? 'OpenAI rejected this API key.'
-        : 'OpenAI verification failed. Check connectivity, permissions and quota.',
+        ? 'The API rejected this key.'
+        : 'API verification failed. Check connectivity, permissions and quota.',
       422,
     );
   }

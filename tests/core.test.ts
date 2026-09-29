@@ -338,3 +338,36 @@ test('Telegram text, voice and video notes feed summaries and persist completed 
     await rm(store.dir, { recursive: true, force: true });
   }
 });
+
+test('custom summary API uses its configured endpoint, exact model and credential', async () => {
+  const original = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    requests.push(String(url));
+    assert.equal((init?.headers as Record<string, string>).Authorization, 'Bearer sk-custom-test');
+    if (String(url).endsWith('/models'))
+      return Response.json({ data: [{ id: 'cx/gpt-5.6-sol(low)' }] });
+    assert.equal(JSON.parse(String(init?.body)).model, 'cx/gpt-5.6-sol(low)');
+    return Response.json({ choices: [{ message: { content: 'Test summary' } }] });
+  }) as typeof fetch;
+  try {
+    const config = configSchema.parse({
+      llmBrain: 'chatgpt',
+      chatGptBaseUrl: 'http://127.0.0.1:20128/v1/',
+      chatGptApiKey: 'sk-custom-test',
+      chatGptModel: 'cx/gpt-5.6-sol(low)',
+    });
+    await verifyOpenAI(config.chatGptApiKey, config.chatGptBaseUrl);
+    const result = await summarize(config, [
+      { messageId: 1, timestamp: Date.now(), sender: 'Test', text: 'A meeting tomorrow.' },
+    ]);
+    assert.equal(result.provider, 'Custom API');
+    assert.equal(result.fallback, false);
+    assert.deepEqual(requests, [
+      'http://127.0.0.1:20128/v1/models',
+      'http://127.0.0.1:20128/v1/chat/completions',
+    ]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
