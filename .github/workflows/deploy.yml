@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
 
 permissions:
   contents: read
@@ -22,6 +24,8 @@ jobs:
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Configure SSH
         env:
@@ -41,7 +45,12 @@ jobs:
         run: |
           set -euo pipefail
           ssh_options=(-i "$HOME/.ssh/deploy_key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
-          release="/opt/telegrambot/releases/$GITHUB_SHA"
+          release="/opt/telegrambot/releases/$(git rev-parse HEAD)"
+          current=$(ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" 'if [ -L /opt/telegrambot/current ]; then readlink /opt/telegrambot/current; fi')
+          if [[ "$current" == "$release" ]]; then
+            echo 'Latest main commit is already deployed.'
+            exit 0
+          fi
           git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "mkdir -p '$release'"
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "tar -xf - -C '$release'" < "$RUNNER_TEMP/source.tar"

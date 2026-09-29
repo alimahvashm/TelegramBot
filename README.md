@@ -15,6 +15,8 @@ In this repository's **Settings → Secrets and variables → Actions**, configu
 
 The server must allow SSH from the GitHub runner and have `tar` and GNU `mv` installed. The workflow can also be run manually from the Actions tab.
 
+Once enabled, a schedule checks the latest `main` every 15 minutes, so an outage does not require another push to retry deployment. GitHub may delay scheduled runs. Checks skip uploading when that commit is already deployed. Scheduled workflows in public repositories may be disabled after 60 days without repository activity.
+
 Each deployment uploads a complete code snapshot to `/opt/telegrambot/releases/<commit>`. Only after successful upload does `/opt/telegrambot/current` switch to that snapshot. Previous releases are retained. Reserve these paths for this workflow.
 
 Keep bot tokens, runtime data, and server environment files outside release directories, for example in `/opt/telegrambot/shared`. Only tracked Git files are uploaded.
