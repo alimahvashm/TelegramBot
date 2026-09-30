@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+node_modules
+data
+bot_config.json
+chat_history.json
+.venv
+*.log
+pybackend/__pycache__
+pytests/__pycache__
