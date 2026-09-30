@@ -19,7 +19,11 @@ fi
 
 # GitHub Actions uploads a tested image. A manual source-only deployment can still build here.
 if ! docker image inspect "$DEPLOY_IMAGE" >/dev/null 2>&1; then
-  docker build --tag "$DEPLOY_IMAGE" "$release"
+  if docker image inspect telegrambot:e8aae63d1b9c844d2029d572b7f12ac63b81226a >/dev/null 2>&1 && test -f "$release/dist/public/index.html"; then
+    docker build --file "$release/deploy/overlay.Dockerfile" --tag "$DEPLOY_IMAGE" "$release"
+  else
+    docker build --tag "$DEPLOY_IMAGE" "$release"
+  fi
 fi
 "${compose[@]}" stop --timeout 240
 if "${compose[@]}" up -d --wait --wait-timeout 120; then

@@ -45,9 +45,6 @@ jobs:
           python -m pip install -r requirements.txt pytest
           python -m pytest -q pytests
 
-      - name: Build production image
-        run: docker build --tag "telegrambot:$(git rev-parse HEAD)" .
-
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -71,9 +68,9 @@ jobs:
             exit 0
           fi
           git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
+          tar -rf "$RUNNER_TEMP/source.tar" dist/public
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "mkdir -p '$release'"
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "tar -xf - -C '$release'" < "$RUNNER_TEMP/source.tar"
-          docker save "telegrambot:$(git rev-parse HEAD)" | gzip -1 | ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" 'gzip -dc | docker load'
           ssh "${ssh_options[@]}" "root@$DEPLOY_HOST" "bash '$release/deploy/server-deploy.sh' '$release'"
 
       - name: Remove SSH credentials
