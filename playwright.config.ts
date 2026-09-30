@@ -19,7 +19,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'node dist/server.js',
+    command: `${process.env.PYTHON || 'python3'} -m uvicorn pybackend.app:app --host 127.0.0.1 --port 4174`,
     url: 'http://127.0.0.1:4174/healthz',
     reuseExistingServer: false,
     env: {
@@ -29,7 +29,6 @@ export default defineConfig({
       HOST: '127.0.0.1',
       ADMIN_PASSWORD: 'browser-test-password-only',
       DATA_DIR: mkdtempSync(path.join(tmpdir(), 'voice-studio-browser-')),
-      NODE_ENV: 'development',
       BOT_ENABLED: 'false',
       TELEGRAM_BOT_TOKEN: '',
       OPENAI_API_KEY: '',
