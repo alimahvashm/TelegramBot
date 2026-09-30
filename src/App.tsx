@@ -991,6 +991,9 @@ function Dashboard({ logout }: { logout: () => void }) {
                   <p>
                     Reply to an Education PDF with <code>/question Your question</code> to ask about its notes.
                   </p>
+                  <p>
+                    Reply to an Education PDF with a photo captioned <code>/image</code> to add picture content.
+                  </p>
                 </div>
                 <span className="badge neutral">Up to 100 messages</span>
               </div>

@@ -3,7 +3,7 @@ import type { Config } from '../shared/config.js';
 import { summaryCount } from '../shared/config.js';
 import { AudioService, MAX_BYTES, MAX_SECONDS } from './audio.js';
 import { AppError, boundedBody, delay, fetchJson } from './http.js';
-import { answerEducationQuestion, createEducationNotes, summarize } from './providers.js';
+import { answerEducationQuestion, createEducationNotes, describeEducationImage, summarize } from './providers.js';
 import { renderEducationPdf } from './education-pdf.js';
 import { Store, type Chat } from './store.js';
 
@@ -29,7 +29,8 @@ type Message = {
   voice?: Media;
   audio?: Media;
   video_note?: Media;
-  document?: { file_name?: string };
+  photo?: Media[];
+  document?: { file_id?: string; file_size?: number; file_name?: string; mime_type?: string };
 };
 type Update = { update_id: number; message?: Message };
 export type BotStatus = {
@@ -53,6 +54,7 @@ export class TelegramBot {
   private educationTimes = new Map<string, number>();
   private summaryTimes = new Map<string, number>();
   private questionTimes = new Map<string, number>();
+  private pendingImages = new Map<string, { documentId: number; expires: number }>();
   constructor(
     private store: Store,
     private audio: AudioService,
@@ -188,10 +190,10 @@ export class TelegramBot {
         reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
       });
   }
-  private async sendPdf(token: string, message: Message, pdf: Buffer) {
+  private async sendPdf(token: string, message: Message, pdf: Buffer, caption = '📚 جزوهٔ آموزشی') {
     const form = new FormData();
     form.append('chat_id', String(message.chat.id));
-    form.append('caption', '📚 جزوهٔ آموزشی');
+    form.append('caption', caption);
     form.append(
       'reply_parameters',
       JSON.stringify({
@@ -214,6 +216,23 @@ export class TelegramBot {
     );
     if (!result.ok) throw new AppError('Telegram did not accept the PDF document.', 502);
     return result.result.message_id;
+  }
+  private async editPdf(token: string, chatId: string, messageId: number, pdf: Buffer) {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('message_id', String(messageId));
+    form.append('media', JSON.stringify({
+      type: 'document',
+      media: 'attach://document',
+      caption: '📚 جزوهٔ آموزشی (به‌روزرسانی‌شده)',
+    }));
+    form.append('document', new Blob([new Uint8Array(pdf)], { type: 'application/pdf' }), 'education-notes.pdf');
+    const result = await fetchJson<{ ok: boolean }>(
+      `https://api.telegram.org/bot${token}/editMessageMedia`,
+      { method: 'POST', body: form },
+      120000,
+    );
+    if (!result.ok) throw new AppError('Telegram did not accept the edited PDF.', 502);
   }
   private chat(message: Message, config: Config): Chat {
     const id = String(message.chat.id);
@@ -256,7 +275,20 @@ export class TelegramBot {
         /* The bot may not have member access. */
       }
     }
-    const match = message.text?.match(/^\/(\w+)(?:@([\w]+))?(?:\s+(.*))?$/s);
+    const pendingKey = `${chat.id}:${message.from?.id || 0}`;
+    const pendingImage = this.pendingImages.get(pendingKey);
+    if (pendingImage && pendingImage.expires < Date.now()) this.pendingImages.delete(pendingKey);
+    if (
+      pendingImage && pendingImage.expires >= Date.now() &&
+      (message.photo?.length || message.document?.mime_type?.startsWith('image/')) &&
+      !message.caption?.startsWith('/')
+    ) {
+      this.pendingImages.delete(pendingKey);
+      await this.applyImage(token, message, chat, config, pendingImage.documentId);
+      return;
+    }
+    const commandText = message.text || (message.caption?.startsWith('/image') ? message.caption : undefined);
+    const match = commandText?.match(/^\/(\w+)(?:@([\w]+))?(?:\s+(.*))?$/s);
     if (
       match &&
       (!match[2] || match[2].toLowerCase() === this.status.bot?.username?.toLowerCase())
@@ -293,6 +325,10 @@ export class TelegramBot {
       }
       if (command === 'question') {
         await this.question(token, message, chat, config, argument?.trim());
+        return;
+      }
+      if (command === 'image') {
+        await this.image(token, message, chat, config);
         return;
       }
       if (command === 'summary') {
@@ -546,6 +582,122 @@ export class TelegramBot {
       text: parts[0],
     });
     for (const part of parts.slice(1)) await this.reply(token, message, part);
+  }
+
+  private imageMedia(message: Message): Media | undefined {
+    if (message.photo?.length) return message.photo.at(-1);
+    if (message.document?.mime_type?.startsWith('image/') && message.document.file_id)
+      return message.document as Media;
+    return undefined;
+  }
+
+  private async image(token: string, message: Message, chat: Chat, config: Config) {
+    const source = message.reply_to_message;
+    if (
+      !source?.document ||
+      source.document.file_name !== 'education-notes.pdf' ||
+      source.from?.id !== this.status.bot?.id
+    ) {
+      await this.reply(token, message, 'برای افزودن تصویر، روی فایل PDF جزوه‌ای که این ربات ساخته ریپلای کنید.');
+      return;
+    }
+    if (!await this.store.readEducationNotes(chat.id, source.message_id)) {
+      await this.reply(token, message, 'متن این جزوه ذخیره نشده است. لطفاً دوباره با /education آن را بسازید و سپس تصویر را اضافه کنید.');
+      return;
+    }
+    if (!this.imageMedia(message)) {
+      if (!message.from?.id) {
+        await this.reply(token, message, 'تصویر را با کپشن /image در ریپلای به فایل PDF بفرستید.');
+        return;
+      }
+      this.pendingImages.set(`${chat.id}:${message.from.id}`, {
+        documentId: source.message_id,
+        expires: Date.now() + 10 * 60000,
+      });
+      await this.reply(token, message, 'حالا تصویر را بفرستید. محتوای خوانای آن به همین جزوه افزوده می‌شود.');
+      return;
+    }
+    await this.applyImage(token, message, chat, config, source.message_id);
+  }
+
+  private async applyImage(
+    token: string,
+    message: Message,
+    chat: Chat,
+    config: Config,
+    documentId: number,
+  ) {
+    const original = await this.store.readEducationNotes(chat.id, documentId);
+    if (!original) {
+      await this.reply(token, message, 'متن این جزوه دیگر در سرور موجود نیست. لطفاً دوباره با /education آن را بسازید.');
+      return;
+    }
+    const media = this.imageMedia(message);
+    if (!media) return;
+    if ((media.file_size || 0) > 5 * 1024 * 1024) {
+      await this.reply(token, message, 'تصویر باید کوچک‌تر از ۵ مگابایت باشد.');
+      return;
+    }
+    const progress = await this.call<{ message_id: number }>(token, 'sendMessage', {
+      chat_id: chat.id,
+      text: '⏳ در حال خواندن تصویر و به‌روزرسانی جزوه…',
+      reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+    });
+    let status: string;
+    try {
+      const file = await this.call<{ file_path?: string; file_size?: number }>(token, 'getFile', {
+        file_id: media.file_id,
+      });
+      if (!file.file_path || (file.file_size || 0) > 5 * 1024 * 1024)
+        throw new AppError('The image exceeds the size limit.', 413);
+      const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
+        signal: AbortSignal.timeout(30000),
+        redirect: 'error',
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new AppError('Telegram image download failed.', 502);
+      }
+      const image = await boundedBody(response, 5 * 1024 * 1024);
+      const mimeType = image.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+        ? 'image/jpeg' as const
+        : image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          ? 'image/png' as const
+          : null;
+      if (!mimeType) throw new AppError('Send a JPEG or PNG image.', 415);
+      const result = await describeEducationImage(config, image, mimeType, (msg) =>
+        this.store.log('warn', msg),
+      );
+      if (/^NO_CONTENT[.!\s]*$/i.test(result.text))
+        throw new AppError('No readable educational content was found in the image.', 422);
+      const updated = `${original}\n\n──────────\n\n📷 مطالب تکمیلی از تصویر\n\n${result.text}`;
+      const pdf = await this.pdfRenderer(updated);
+      let newDocumentId = documentId;
+      let edited = true;
+      try {
+        await this.editPdf(token, chat.id, documentId, pdf);
+      } catch {
+        edited = false;
+        newDocumentId = await this.sendPdf(token, message, pdf, '📚 جزوهٔ آموزشی به‌روزرسانی‌شده');
+      }
+      await this.store.saveEducationNotes(chat.id, documentId, updated);
+      if (newDocumentId !== documentId)
+        await this.store.saveEducationNotes(chat.id, newDocumentId, updated);
+      status = edited
+        ? '✅ تصویر خوانده شد و فایل PDF همین جزوه به‌روزرسانی شد.'
+        : '✅ تصویر خوانده شد و نسخهٔ جدید PDF ارسال شد.';
+      this.store.log('info', `Education PDF updated from an image in chat ${chat.id}.`);
+    } catch (error) {
+      this.store.log('warn', `Education image update failed${error instanceof AppError ? ` (HTTP ${error.status})` : ''}.`);
+      status = error instanceof AppError && [413, 415, 422].includes(error.status)
+        ? error.message
+        : 'خواندن تصویر یا به‌روزرسانی PDF ممکن نشد. لطفاً تصویر واضح‌تری بفرستید یا دسترسی مدل را بررسی کنید.';
+    }
+    await this.call(token, 'editMessageText', {
+      chat_id: chat.id,
+      message_id: progress.message_id,
+      text: status,
+    });
   }
 
   private async summary(

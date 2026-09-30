@@ -122,6 +122,8 @@ Reply to a voice message, audio file, or video note with `/education` (or `/educ
 
 To ask about those notes, reply to the PDF sent by the bot with `/question Your question` (or `/question@YourBot Your question`). The answer uses the configured AI model and only the saved notes behind that PDF. Notes are stored privately on the server for 30 days; PDFs generated before this feature need to be regenerated with `/education` before questions can be answered.
 
+To add content that was shown in a picture but not spoken, reply to an Education PDF with a photo whose caption is `/image`. You can also reply `/image` to the PDF and send a JPEG or PNG photo within 10 minutes. The configured vision-capable AI model reads visible educational content, appends it to the notes, and replaces the PDF in Telegram. If Telegram cannot edit the original message, the bot sends a new updated PDF. The original image must be smaller than 5 MB.
+
 The production image includes WeasyPrint and the B Nazanin regular and bold fonts used for PDF rendering. Install WeasyPrint locally if you run the bot outside Docker.
 
 Long recordings are decoded and transcribed sequentially in 60-second segments. Unrecognized segments are explicitly marked; provider failures abort the job rather than returning incomplete notes. Long education transcripts are processed in ordered sections and assembled without a lossy final summary. WAV download is available only for recordings up to 60 seconds. Telegram cloud downloads still require files no larger than 20 MB.
