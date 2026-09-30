@@ -97,6 +97,35 @@ export class TelegramBot {
   private async loop(token: string, signal: AbortSignal) {
     const identity = createHash('sha256').update(token).digest('hex').slice(0, 20);
     let failures = 0;
+    let pollOffset = this.store.state.offsets[identity] || 0;
+    const pending: { id: number; done: boolean }[] = [];
+    const chatQueues = new Map<string, Promise<void>>();
+    const jobs = new Set<Promise<void>>();
+    const enqueue = (update: Update) => {
+      const entry = { id: update.update_id, done: false };
+      pending.push(entry);
+      const chatId = update.message ? String(update.message.chat.id) : `update:${entry.id}`;
+      const previous = chatQueues.get(chatId) || Promise.resolve();
+      const job = previous.then(async () => {
+        try {
+          if (update.message) await this.handle(token, update.message, this.store.config);
+        } catch {
+          this.store.log('error', 'Message processing failed; the update has been recorded.');
+        }
+        entry.done = true;
+        while (pending[0]?.done) {
+          this.store.state.offsets[identity] = pending.shift()!.id + 1;
+        }
+        await this.store.saveState();
+      });
+      const settled = job.catch(() => this.store.log('error', 'Could not save processed update state.'));
+      chatQueues.set(chatId, settled);
+      jobs.add(settled);
+      void settled.then(() => {
+        jobs.delete(settled);
+        if (chatQueues.get(chatId) === settled) chatQueues.delete(chatId);
+      });
+    };
     while (!signal.aborted) {
       try {
         if (!this.status.bot) {
@@ -114,7 +143,7 @@ export class TelegramBot {
           token,
           'getUpdates',
           {
-            offset: this.store.state.offsets[identity] || 0,
+            offset: pollOffset,
             timeout: 30,
             limit: 20,
             allowed_updates: ['message'],
@@ -127,14 +156,11 @@ export class TelegramBot {
         failures = 0;
         for (const update of updates) {
           if (signal.aborted) break;
-          try {
-            if (update.message) await this.handle(token, update.message, this.store.config);
-          } catch {
-            this.store.log('error', 'Message processing failed; the update has been recorded.');
-          }
-          this.store.state.offsets[identity] = update.update_id + 1;
-          await this.store.saveState();
+          if (update.update_id < pollOffset) continue;
+          enqueue(update);
+          pollOffset = update.update_id + 1;
         }
+        if (jobs.size >= 100) await Promise.race(jobs);
       } catch (error) {
         if (signal.aborted) break;
         const code = error instanceof AppError ? error.status : 0;
@@ -151,6 +177,7 @@ export class TelegramBot {
         await delay(Math.min(60000, 2000 * 2 ** Math.min(failures++, 5)), signal);
       }
     }
+    await Promise.all(jobs);
   }
   private async reply(token: string, message: Message, text: string) {
     for (const part of chunks(text))

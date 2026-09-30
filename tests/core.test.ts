@@ -175,6 +175,55 @@ test('polling exposes 409 conflicts and stops without a retry storm', async () =
     await rm(store.dir, { recursive: true, force: true });
   }
 });
+test('one busy group does not block another group or commit unfinished updates', async (t) => {
+  const store = await tempStore();
+  const original = globalThis.fetch;
+  store.config = configSchema.parse({ token: '123456:abcdefghijklmnopqrstuvwxyz', enabled: true });
+  const bot = new TelegramBot(store, new AudioService());
+  const seen: number[] = [];
+  let releaseFirst!: () => void;
+  const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  t.mock.method(bot, 'handle', async (_token, message) => {
+    if (message.message_id === 1) await firstHeld;
+    seen.push(message.message_id);
+  });
+  let polled = false;
+  globalThis.fetch = (async (url: string | URL | Request, options?: RequestInit) => {
+    const method = String(url).split('/').at(-1);
+    if (method === 'getMe')
+      return Response.json({ ok: true, result: { id: 1, username: 'testbot', first_name: 'Test' } });
+    if (method === 'getWebhookInfo') return Response.json({ ok: true, result: { url: '' } });
+    if (!polled) {
+      polled = true;
+      return Response.json({ ok: true, result: [
+        { update_id: 1, message: { message_id: 1, chat: { id: 10, type: 'group' } } },
+        { update_id: 2, message: { message_id: 2, chat: { id: 10, type: 'group' } } },
+        { update_id: 3, message: { message_id: 3, chat: { id: 20, type: 'group' } } },
+      ] });
+    }
+    return new Promise<Response>((_resolve, reject) => {
+      if (options?.signal?.aborted) reject(new Error('Aborted'));
+      else options?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+    });
+  }) as typeof fetch;
+  try {
+    await bot.reconcile();
+    for (let i = 0; i < 100 && !seen.includes(3); i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(seen, [3]);
+    assert.equal(Object.values(store.state.offsets).length, 0);
+    releaseFirst();
+    for (let i = 0; i < 100 && !Object.values(store.state.offsets).includes(4); i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(seen, [3, 1, 2]);
+    assert.ok(Object.values(store.state.offsets).includes(4));
+  } finally {
+    releaseFirst();
+    await bot.stop();
+    globalThis.fetch = original;
+    await rm(store.dir, { recursive: true, force: true });
+  }
+});
 test('API requires login, rejects cross-origin writes, masks keys and persists audience changes', async () => {
   const store = await tempStore();
   const audio = new AudioService();
