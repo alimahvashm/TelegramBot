@@ -48,7 +48,7 @@ Audio is limited to **20 MB and 60 minutes**, with at most two active conversion
 
 ## Custom summary API
 
-Select **OpenAI / custom API**, set the API base URL (including `/v1`), enter the exact model identifier, and save its API key. Verification and completion requests both use that endpoint. Environment bootstrap supports `LLM_BRAIN=chatgpt`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, and `OPENAI_API_KEY`. The key belongs in the ignored `.env` or server settings, never Git.
+Select **OpenAI / custom API**, set the API base URL (including `/v1`), enter the exact model identifier, and save its API key. Verification and completion requests both use that endpoint. The dashboard also lets you edit and save the Education system prompt used by `/education`, or reset it to its original wording. Environment bootstrap supports `LLM_BRAIN=chatgpt`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, and `OPENAI_API_KEY`. Keys and the bot token belong in the ignored `.env` or server settings, never Git.
 
 ## Persistence and security
 

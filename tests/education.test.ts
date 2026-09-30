@@ -37,6 +37,24 @@ test('education uses the configured model and keeps the complete lecture separat
   await assert.rejects(createEducationNotes(configSchema.parse({}), ''), /No lecture transcript/);
 });
 
+test('education uses a saved custom prompt for every lecture section', async (t) => {
+  const systems: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    systems.push(JSON.parse(String(options.body)).messages[0].content);
+    return Response.json({ choices: [{ message: { content: 'جزوهٔ درس' } }] });
+  });
+  await createEducationNotes(
+    configSchema.parse({
+      llmBrain: 'chatgpt',
+      chatGptApiKey: 'test-key',
+      educationSystemPrompt: 'راهنمای اختصاصی جزوه‌نویسی',
+    }),
+    'متن درس '.repeat(1800),
+  );
+  assert.ok(systems.length > 1);
+  assert.ok(systems.every((system) => system.includes('راهنمای اختصاصی جزوه‌نویسی')));
+});
+
 test('reply education transcribes the target, delivers long notes, enforces limits and reports failures', async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), 'education-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

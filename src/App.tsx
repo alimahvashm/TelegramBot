@@ -39,6 +39,7 @@ import {
   type PublicConfig,
   type SecretField,
 } from '../shared/config';
+import { defaultEducationPrompt } from '../shared/education-prompt';
 import { api, post } from './api';
 import AudioLab from './AudioLab';
 
@@ -919,6 +920,28 @@ function Dashboard({ logout }: { logout: () => void }) {
                   <div className="prompt-meta">
                     <span>Shared across both AI providers</span>
                     <span>{config.summarySystemPrompt.length.toLocaleString()} / 12,000</span>
+                  </div>
+                  <div className="prompt-label mt-5">
+                    <label htmlFor="education-prompt">Education system prompt</label>
+                    <button
+                      className="text-button"
+                      onClick={() => change('educationSystemPrompt', defaultEducationPrompt)}
+                    >
+                      <RefreshCw size={12} />
+                      Reset to default
+                    </button>
+                  </div>
+                  <textarea
+                    id="education-prompt"
+                    dir="auto"
+                    rows={10}
+                    value={config.educationSystemPrompt}
+                    maxLength={12000}
+                    onChange={(e) => change('educationSystemPrompt', e.target.value)}
+                  />
+                  <div className="prompt-meta">
+                    <span>Used for /education in every group</span>
+                    <span>{config.educationSystemPrompt.length.toLocaleString()} / 12,000</span>
                   </div>
                   <button
                     className="button secondary w-full mt-5"
