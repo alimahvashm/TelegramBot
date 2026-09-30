@@ -90,7 +90,7 @@ export function mergeConfig(current: Config, input: unknown): Config {
   return configSchema.parse({ ...current, ...values });
 }
 export function summaryCount(value?: string): number {
-  if (!value) return 30;
-  if (!/^\d+$/.test(value)) throw new Error('Use /summary or /summary 50 (1–100 messages).');
+  if (!value) return 50;
+  if (!/^\d+$/.test(value)) throw new Error('Use /summary or /summary 100 (1–100 messages).');
   return Math.max(1, Math.min(100, Number(value)));
 }

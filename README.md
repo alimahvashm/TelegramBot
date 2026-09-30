@@ -23,7 +23,7 @@ Open http://127.0.0.1:5173 and sign in. Vite proxies API requests to the Python 
 Save the Telegram token in the dashboard and enable polling. Configure Google ASR, a separate FastAPI transcription endpoint, or Gemini for speech recognition. Google ASR is a legacy unofficial endpoint and may be unavailable. Configure an OpenAI-compatible API or OpenRouter for AI features. Provider keys and the bot token belong in the ignored `.env` or saved dashboard settings, never Git.
 
 - Voice, audio and video notes are transcribed. Audio up to 20 MB and 60 minutes is split into 60-second segments and recombined in order.
-- `/summary` summarizes the last 30 received chat messages; `/summary 50` changes the count, up to 100. In groups, disable Telegram privacy mode so the bot receives ordinary messages. The bot cannot retrieve older messages that Telegram never sent it.
+- `/summary` summarizes the last 50 received chat messages; `/summary 100` changes the count, up to 100. In groups, disable Telegram privacy mode so the bot receives ordinary messages. The bot cannot retrieve older messages that Telegram never sent it.
 - `/language fa-IR` and `/language en-US` set recognition language; only group administrators can change a group's language.
 - Reply `/education` to an audio message to transcribe it and generate a Persian study-notes PDF in B Nazanin. The Education prompt is editable in the dashboard.
 - Reply `/question Your question` to that PDF to ask about its saved notes. Reply `/image` and attach a JPEG/PNG photo, or send the photo next, to append visible lecture content and update the PDF.

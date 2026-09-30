@@ -118,7 +118,7 @@ def public_config(config: dict) -> dict:
 
 def summary_count(value: str | None) -> int:
     if not value:
-        return 30
+        return 50
     if not value.isdecimal():
-        raise ValueError('Use /summary or /summary 50 (1–100 messages).')
+        raise ValueError('Use /summary or /summary 100 (1–100 messages).')
     return max(1, min(100, int(value)))

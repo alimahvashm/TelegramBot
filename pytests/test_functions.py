@@ -9,7 +9,7 @@ import pytest
 os.environ['ADMIN_PASSWORD'] = 'abcdefghijklmnop'
 os.environ['COOKIE_SECURE'] = 'false'
 from pybackend.audio import AudioService
-from pybackend.config import Config
+from pybackend.config import Config, summary_count
 from pybackend import providers
 from pybackend.store import Store
 from pybackend.telegram import TelegramBot
@@ -17,6 +17,13 @@ from pybackend.telegram import TelegramBot
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def test_summary_default_and_override():
+    assert summary_count(None) == 50
+    assert summary_count('') == 50
+    assert summary_count('25') == 25
+    assert summary_count('100') == 100
 
 
 def test_provider_tasks_and_long_notes(monkeypatch):

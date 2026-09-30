@@ -985,8 +985,8 @@ function Dashboard({ logout }: { logout: () => void }) {
                 <div>
                   <strong>A whole conversation. One command.</strong>
                   <p>
-                    Send <code>/summary</code> in any connected chat, or <code>/summary 50</code>{' '}
-                    for a little more context.
+                    Send <code>/summary</code> for the latest 50 messages, or <code>/summary 100</code>{' '}
+                    for a longer summary.
                   </p>
                   <p>
                     Reply to an Education PDF with <code>/question Your question</code> to ask about its notes.
