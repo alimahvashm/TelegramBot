@@ -61,6 +61,34 @@ def test_existing_persisted_notes_and_config(tmp_path):
     run(scenario())
 
 
+def test_pdf_statistics_are_per_chat_and_persist(tmp_path):
+    async def scenario():
+        store = Store(tmp_path)
+        await store.init()
+        group = {'id': '-123', 'title': 'Study group', 'type': 'supergroup', 'history': []}
+        private = {'id': '456', 'title': 'A user', 'type': 'private', 'history': []}
+        store.state['chats'] = {'-123': group, '456': private}
+        store.record_pdf(group)
+        store.record_pdf(group)
+        store.record_pdf(private)
+        await store.save_state()
+        restored = Store(tmp_path)
+        await restored.init()
+        metrics = restored.state['metrics']
+        assert (metrics['pdfsGenerated'], metrics['groupPdfs'], metrics['privatePdfs']) == (3, 2, 1)
+        assert restored.state['chats']['-123']['pdfCount'] == 2
+        assert restored.state['chats']['456']['pdfCount'] == 1
+        assert restored.state['chats']['456']['lastPdfAt'] > 0
+        app = create_app(restored, TelegramBot(restored, AudioService()), password='abcdefghijklmnop', start_bot=False)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+                await client.post('/api/auth/login', json={'password': 'abcdefghijklmnop'})
+                audience = (await client.get('/api/bot/audience')).json()
+                assert audience['metrics']['pdfsGenerated'] == 3
+                assert {chat['id']: chat['pdfCount'] for chat in audience['chats']} == {'-123': 2, '456': 1}
+    run(scenario())
+
+
 @pytest.mark.skipif(sys.platform == "darwin", reason="WeasyPrint native libraries are installed in Linux Docker/CI")
 def test_pdf_is_rendered(tmp_path):
     async def scenario():

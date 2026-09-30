@@ -99,12 +99,16 @@ def test_education_question_and_image_command_flow(tmp_path, monkeypatch):
         source_audio = {'message_id': 1, 'voice': {'file_id': 'voice'}}
         await bot.handle('token', message(2, '/education', source_audio), config)
         assert await store.read_education_notes('-123', 700) == 'جزوهٔ خوب'
+        assert store.state['metrics']['pdfsGenerated'] == 1
+        assert store.state['metrics']['groupPdfs'] == 1
         source_pdf = {'message_id': 700, 'document': {'file_name': 'education-notes.pdf'}, 'from': {'id': 999}}
         await bot.handle('token', message(3, '/question چی؟', source_pdf), config)
         assert any(method == 'editMessageText' and data['text'] == 'پاسخ جزوه' for method, data in sent)
         image_message = message(4, '/image', source_pdf, [{'file_id': 'image', 'file_size': 10}])
         await bot.handle('token', image_message, config)
         assert 'مطالب تصویر' in await store.read_education_notes('-123', 700)
+        assert store.state['metrics']['pdfsGenerated'] == 2
+        assert store.state['chats']['-123']['pdfCount'] == 2
         bot.edit_pdf.assert_awaited_once()
         await bot.close()
     run(scenario())

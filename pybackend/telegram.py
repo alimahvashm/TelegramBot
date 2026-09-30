@@ -166,7 +166,8 @@ class TelegramBot:
         chats = self.store.state['chats']
         chat = chats.get(chat_id) or {'id': chat_id, 'title': '', 'type': chat_data['type'],
             'language': config['language'], 'enabled': True, 'memberCount': None, 'membersUpdatedAt': 0,
-            'messageCount': 0, 'audioCount': 0, 'lastActive': 0, 'history': []}
+            'messageCount': 0, 'audioCount': 0, 'pdfCount': 0, 'lastPdfAt': None,
+            'lastActive': 0, 'history': []}
         chat['title'] = chat_data.get('title') or chat_data.get('first_name') or f'Chat {chat_id}'
         chat['type'] = chat_data['type']
         chat['lastActive'] = int(time.time() * 1000)
@@ -313,6 +314,7 @@ class TelegramBot:
             try:
                 await update('📄 در حال آماده‌سازی فایل PDF…')
                 document_id = await self.send_pdf(token, message, await self.pdf_renderer(output))
+                self.store.record_pdf(chat)
                 try:
                     await self.store.save_education_notes(chat['id'], document_id, output)
                 except Exception:
@@ -422,6 +424,7 @@ class TelegramBot:
             except Exception:
                 edited = False
                 new_id = await self.send_pdf(token, message, pdf, '📚 جزوهٔ آموزشی به‌روزرسانی‌شده')
+            self.store.record_pdf(chat)
             await self.store.save_education_notes(chat['id'], document_id, updated)
             if new_id != document_id:
                 await self.store.save_education_notes(chat['id'], new_id, updated)

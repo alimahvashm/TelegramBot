@@ -36,6 +36,8 @@ The model must support image input for `/image`. Education source notes are stor
 
 The API routes are `/healthz`, `/api/auth/login`, `/api/auth/session`, `/api/auth/logout`, `/api/bot/config`, `/api/bot/restart`, `/api/bot/audience`, `/api/bot/audience/{id}`, `/api/bot/verify-chatgpt`, `/api/bot/test-summary`, `/api/transcode` and `/api/events`. The dashboard uses the same request and response formats as the previous backend.
 
+The dashboard counts Education PDFs successfully sent or updated from this release onward. It shows a total, group and private-chat subtotals, and each conversation's PDF count and latest PDF time in Audience & groups. Older PDFs cannot be counted reliably because previous releases did not store a lifetime PDF counter.
+
 ## Deploy and verify
 
 `.github/workflows/deploy.yml` builds and tests the frontend and Python backend, uploads the built frontend and Python source to `root@109.248.160.162`, and switches the single Compose service after health checks. It runs on pushes to `main`, manually, and every 15 minutes for retries. The workflow needs GitHub Actions secret `DEPLOY_SSH_KEY` for a dedicated server key and optional variable `DEPLOY_PORT`. The server builds a small Python overlay image from its existing runtime image. The standalone Dockerfile remains available for a clean install. The server keeps `.env` and data at `/opt/telegrambot/shared/`. `deploy/server-deploy.sh` restores the prior image if the new one fails health checks.

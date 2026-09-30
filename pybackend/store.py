@@ -34,8 +34,23 @@ class Store:
             self.state = json.loads(state_file.read_text())
         if any(key not in self.state for key in ('chats', 'users', 'offsets', 'metrics')):
             raise RuntimeError('Invalid chat_history.json. Restore from a backup.')
+        metrics = self.state['metrics']
+        metrics.setdefault('pdfTrackingStartedAt', int(time.time() * 1000))
+        for key in ('pdfsGenerated', 'groupPdfs', 'privatePdfs'):
+            metrics.setdefault(key, 0)
+        for chat in self.state['chats'].values():
+            chat.setdefault('pdfCount', 0)
+            chat.setdefault('lastPdfAt', None)
         self.prune()
         await self.prune_education_notes()
+
+    def record_pdf(self, chat: dict):
+        now = int(time.time() * 1000)
+        chat['pdfCount'] = chat.get('pdfCount', 0) + 1
+        chat['lastPdfAt'] = now
+        metrics = self.state['metrics']
+        metrics['pdfsGenerated'] += 1
+        metrics['privatePdfs' if chat['type'] == 'private' else 'groupPdfs'] += 1
 
     async def _write(self, name: str, value):
         async with self._write_lock:

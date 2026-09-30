@@ -70,6 +70,8 @@ type Audience = {
     memberCount: number | null;
     messageCount: number;
     audioCount: number;
+    pdfCount: number;
+    lastPdfAt: number | null;
     lastActive: number;
     dailyMessages?: Record<string, number>;
   }[];
@@ -81,6 +83,10 @@ type Audience = {
     succeeded: number;
     failed: number;
     summaries: number;
+    pdfsGenerated: number;
+    groupPdfs: number;
+    privatePdfs: number;
+    pdfTrackingStartedAt: number;
     successRate: number | null;
   };
 };
@@ -403,7 +409,11 @@ function Dashboard({ logout }: { logout: () => void }) {
     audience?.chats.filter(
       (c) =>
         `${c.title} ${c.id}`.toLowerCase().includes(search.toLowerCase()) &&
-        (filter === 'all' || (filter === 'private' ? c.type === 'private' : c.type !== 'private')),
+        (filter === 'all' ||
+          (filter === 'private' && c.type === 'private') ||
+          (filter === 'groups' && c.type !== 'private') ||
+          (filter === 'private-pdfs' && c.type === 'private' && c.pdfCount > 0) ||
+          (filter === 'group-pdfs' && c.type !== 'private' && c.pdfCount > 0)),
     ) || [];
   return (
     <div className="workspace">
@@ -573,6 +583,13 @@ function Dashboard({ logout }: { logout: () => void }) {
                 icon: Headphones,
                 color: 'peach',
                 hint: `${metrics?.summaries || 0} summaries generated`,
+              },
+              {
+                label: 'PDFs generated',
+                value: metrics?.pdfsGenerated,
+                icon: FileText,
+                color: 'purple',
+                hint: `${metrics?.groupPdfs || 0} in groups · ${metrics?.privatePdfs || 0} in private chats`,
               },
               {
                 label: 'Success rate',
@@ -1007,7 +1024,12 @@ function Dashboard({ logout }: { logout: () => void }) {
                 </span>
                 <div>
                   <h2>Your conversation directory</h2>
-                  <p>{metrics?.uniqueUsers || 0} unique participants active in the last 30 days</p>
+                  <p>
+                    {metrics?.uniqueUsers || 0} unique participants active in the last 30 days
+                    {metrics?.pdfTrackingStartedAt
+                      ? ` · PDF counts since ${new Date(metrics.pdfTrackingStartedAt).toLocaleDateString()}`
+                      : ''}
+                  </p>
                 </div>
               </div>
               <div className="directory-tools">
@@ -1028,6 +1050,8 @@ function Dashboard({ logout }: { logout: () => void }) {
                   <option value="all">All conversations</option>
                   <option value="groups">Groups only</option>
                   <option value="private">Private users</option>
+                  <option value="group-pdfs">Groups with PDFs</option>
+                  <option value="private-pdfs">Private chats with PDFs</option>
                 </select>
               </div>
               {chats.length ? (
@@ -1037,6 +1061,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                       <tr>
                         <th>Conversation</th>
                         <th>Messages / audio</th>
+                        <th>PDFs generated</th>
                         <th>Language</th>
                         <th>Last active</th>
                         <th>Controls</th>
@@ -1071,6 +1096,14 @@ function Dashboard({ logout }: { logout: () => void }) {
                             <small>
                               {chat.dailyMessages?.[new Date().toISOString().slice(0, 10)] || 0}{' '}
                               messages today (UTC)
+                            </small>
+                          </td>
+                          <td>
+                            {chat.pdfCount.toLocaleString()}
+                            <small>
+                              {chat.lastPdfAt
+                                ? `Latest ${new Date(chat.lastPdfAt).toLocaleString()}`
+                                : 'No PDFs yet'}
                             </small>
                           </td>
                           <td>
