@@ -31,11 +31,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - name: Validate application before deployment
         run: |
           npm ci
           npm run build
-          npm test
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q pytests
 
       - name: Build production image
         run: docker build --tag "telegrambot:$(git rev-parse HEAD)" .

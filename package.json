@@ -7,31 +7,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently -k \"tsx watch server.ts\" \"vite --host 127.0.0.1\"",
-    "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "start": "node dist/server.js",
-    "test": "tsx --test tests/*.test.ts",
+    "dev": "concurrently -k \"uvicorn pybackend.app:app --host 127.0.0.1 --port 3000 --reload\" \"vite --host 127.0.0.1\"",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit",
     "test:browser": "playwright test"
   },
   "dependencies": {
-    "dotenv": "^16.6.1",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.1.0",
-    "helmet": "^8.1.0",
     "lucide-react": "^0.468.0",
-    "multer": "^2.0.2",
-    "proper-lockfile": "^4.1.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.1",
-    "@types/express": "^5.0.3",
-    "@types/multer": "^2.0.0",
-    "@types/node": "^22.18.6",
-    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^4.7.0",
@@ -39,7 +27,6 @@
     "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vite": "^6.4.1"
   }
