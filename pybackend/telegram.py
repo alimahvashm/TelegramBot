@@ -12,6 +12,7 @@ from .config import summary_count
 from .errors import AppError, request_json, response_bytes
 from .pdf import render_education_pdf
 from .providers import summarize, create_education_notes, answer_education_question, describe_education_image
+from .visual import MAX_VISUAL_BYTES, describe_visual, frames_from_media
 from .store import Store
 
 MAX_IMAGE = 5 * 1024 * 1024
@@ -33,6 +34,7 @@ class TelegramBot:
         self.summary_times = {}
         self.question_times = {}
         self.pending_images = {}
+        self.visual_workers = asyncio.Semaphore(3)
 
     async def close(self):
         await self.stop()
@@ -167,6 +169,7 @@ class TelegramBot:
         chat = chats.get(chat_id) or {'id': chat_id, 'title': '', 'type': chat_data['type'],
             'language': config['language'], 'enabled': True, 'memberCount': None, 'membersUpdatedAt': 0,
             'messageCount': 0, 'audioCount': 0, 'pdfCount': 0, 'lastPdfAt': None,
+            'describeMedia': False,
             'lastActive': 0, 'history': []}
         chat['title'] = chat_data.get('title') or chat_data.get('first_name') or f'Chat {chat_id}'
         chat['type'] = chat_data['type']
@@ -218,6 +221,8 @@ class TelegramBot:
                 else:
                     await self.reply(token, message, 'Use /language fa-IR or /language en-US.')
                 return
+            if command == 'describe':
+                await self.describe_command(token, message, chat, config, argument); return
             if command == 'education':
                 await self.education(token, message, chat, config); return
             if command == 'question':
@@ -233,6 +238,10 @@ class TelegramBot:
         text = message.get('text') or message.get('caption') or (f'[Shared file: {message["document"].get("file_name", "unnamed")}]' if message.get('document') else '')
         if text:
             remember(text)
+        gif_document = (message.get('document') or {}).get('mime_type') == 'image/gif'
+        if chat.get('describeMedia') and (message.get('animation') or message.get('sticker') or gif_document):
+            await self.describe_message(token, message, chat, config)
+            return
         media = message.get('voice') or message.get('audio') or message.get('video_note')
         if not media:
             return
@@ -268,6 +277,76 @@ class TelegramBot:
         data = await response_bytes(response, MAX_BYTES)
         result = await self.audio.process(data, config, language, False, progress)
         return result['text']
+
+    async def describe_command(self, token: str, message: dict, chat: dict, config: dict, argument: str):
+        if argument not in ('on', 'off'):
+            state = 'روشن' if chat.get('describeMedia') else 'خاموش'
+            await self.reply(token, message, f'توضیح خودکار GIF و استیکر در این گفتگو {state} است. دستور: /describe on یا /describe off')
+            return
+        if chat['type'] != 'private':
+            sender_id = message.get('from', {}).get('id')
+            if not sender_id:
+                await self.reply(token, message, 'فقط مدیر گروه می‌تواند این قابلیت را تغییر دهد.')
+                return
+            try:
+                member = await self.call(token, 'getChatMember', {'chat_id': chat['id'], 'user_id': sender_id})
+            except Exception:
+                await self.reply(token, message, 'بررسی مدیر گروه ممکن نشد. کمی بعد دوباره تلاش کنید.')
+                return
+            if member.get('status') not in ('creator', 'administrator'):
+                await self.reply(token, message, 'فقط مدیر گروه می‌تواند این قابلیت را تغییر دهد.')
+                return
+        if argument == 'on' and not config.get('chatGptApiKey'):
+            await self.reply(token, message, 'مدل توضیح تصویر تنظیم نشده است. از مدیر ربات بخواهید کلید API را ثبت کند.')
+            return
+        chat['describeMedia'] = argument == 'on'
+        await self.reply(token, message, 'توضیح خودکار GIF و استیکر در این گفتگو ' +
+                         ('روشن شد.' if chat['describeMedia'] else 'خاموش شد.'))
+
+    async def download_visual(self, token: str, media: dict, limit: int) -> bytes:
+        if not media.get('file_id') or media.get('file_size', 0) > limit:
+            raise AppError('GIF or sticker is too large to describe.', 413)
+        file = await self.call(token, 'getFile', {'file_id': media['file_id']})
+        if not file.get('file_path') or file.get('file_size', 0) > limit:
+            raise AppError('GIF or sticker is unavailable or too large.', 413)
+        response = await self.client.get(f'https://api.telegram.org/file/bot{token}/{file["file_path"]}',
+                                         timeout=30, follow_redirects=False)
+        if response.status_code >= 400:
+            raise AppError('Telegram media download failed.', 502)
+        return await response_bytes(response, limit)
+
+    async def describe_message(self, token: str, message: dict, chat: dict, config: dict):
+        animation = message.get('animation')
+        sticker = message.get('sticker')
+        gif_document = message.get('document') if (message.get('document') or {}).get('mime_type') == 'image/gif' else None
+        kind = 'GIF' if animation or gif_document else 'sticker'
+        media = animation or gif_document or sticker
+        emoji = (sticker or {}).get('emoji', '')
+        try:
+            async with self.visual_workers:
+                if media.get('width', 0) > 4096 or media.get('height', 0) > 4096 or media.get('width', 0) * media.get('height', 0) > 16_000_000:
+                    raise AppError('GIF or sticker dimensions are too large.', 413)
+                # TGS stickers are vector animations; Telegram's WEBP/JPEG thumbnail is their visual preview.
+                preview = sticker.get('thumbnail') if sticker and sticker.get('is_animated') else None
+                selected = preview or media
+                if sticker and not preview and sticker.get('is_animated'):
+                    frames = []
+                else:
+                    try:
+                        data = await self.download_visual(token, selected, 5 * 1024 * 1024 if sticker else MAX_VISUAL_BYTES)
+                        duration = float((animation or {}).get('duration') or (1.2 if sticker and sticker.get('is_video') else 0))
+                        frames = await frames_from_media(data, duration)
+                    except Exception:
+                        if not sticker or not emoji:
+                            raise
+                        frames = []
+                description = await describe_visual(config, frames, kind, emoji)
+            await self.reply(token, message, description)
+            self.store.log('info', f'Described {kind} in chat {chat["id"]}.')
+        except Exception as exc:
+            self.store.log('warn', f'{kind} description failed in chat {chat["id"]}' +
+                           (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')
+            await self.reply(token, message, 'توضیح این GIF یا استیکر فعلاً ممکن نشد.')
 
     async def education(self, token: str, message: dict, chat: dict, config: dict):
         source = message.get('reply_to_message') or {}

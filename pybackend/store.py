@@ -41,6 +41,7 @@ class Store:
         for chat in self.state['chats'].values():
             chat.setdefault('pdfCount', 0)
             chat.setdefault('lastPdfAt', None)
+            chat.setdefault('describeMedia', False)
         self.prune()
         await self.prune_education_notes()
 

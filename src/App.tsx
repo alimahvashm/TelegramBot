@@ -72,6 +72,7 @@ type Audience = {
     audioCount: number;
     pdfCount: number;
     lastPdfAt: number | null;
+    describeMedia: boolean;
     lastActive: number;
     dailyMessages?: Record<string, number>;
   }[];
@@ -1087,6 +1088,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                                     ? chat.type
                                     : `${chat.memberCount} members`}
                                 </small>
+                                <small>GIF/sticker replies: {chat.describeMedia ? 'On' : 'Off'}</small>
                               </div>
                             </div>
                           </td>

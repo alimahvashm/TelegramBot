@@ -27,6 +27,7 @@ Save the Telegram token in the dashboard and enable polling. Configure Google AS
 - `/language fa-IR` and `/language en-US` set recognition language; only group administrators can change a group's language.
 - Reply `/education` to an audio message to transcribe it and generate a Persian study-notes PDF in B Nazanin. The Education prompt is editable in the dashboard.
 - Reply `/question Your question` to that PDF to ask about its saved notes. Reply `/image` and attach a JPEG/PNG photo, or send the photo next, to append visible lecture content and update the PDF.
+- `/describe on` enables short Persian replies to GIFs and stickers in that conversation; `/describe off` disables them, and `/describe` shows the current state. It starts off in every group and private chat. Only group administrators can change it in groups. Ordinary videos and video notes are ignored. Telegram group privacy mode must be disabled for the bot to receive ordinary GIF and sticker messages. The feature uses the saved custom API key with `cx/gpt-6-luna(low)` (or `gpt-6-luna` at the official OpenAI endpoint); `VISUAL_MODEL` can override the model ID if your compatible router uses another name. Animated TGS stickers use Telegram's still thumbnail when available.
 
 The model must support image input for `/image`. Education source notes are stored privately for 30 days under `DATA_DIR/education-notes`. The bot processes messages in order within each chat while different chats can run concurrently.
 
