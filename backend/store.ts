@@ -1,8 +1,14 @@
-import { mkdir, readFile, writeFile, rename, chmod } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, chmod, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { promisify } from 'node:util';
+import { gzip, gunzip } from 'node:zlib';
 import { EventEmitter } from 'node:events';
 import { configSchema, type Config } from '../shared/config.js';
+
+const compress = promisify(gzip);
+const decompress = promisify(gunzip);
+const educationRetentionMs = 30 * 86400000;
 
 export type HistoryMessage = { messageId: number; sender: string; timestamp: number; text: string };
 export type Chat = {
@@ -61,6 +67,52 @@ export class Store {
     if (!this.state.chats || !this.state.metrics || !this.state.offsets || !this.state.users)
       throw new Error('Invalid chat_history.json. Restore from a backup.');
     this.prune();
+    await this.pruneEducationNotes();
+  }
+  private educationPath(chatId: string, messageId: number) {
+    if (!/^-?\d+$/.test(chatId) || !Number.isSafeInteger(messageId) || messageId < 1)
+      throw new Error('Invalid education document ID.');
+    return path.join(this.dir, 'education-notes', `${chatId}_${messageId}.txt.gz`);
+  }
+  async saveEducationNotes(chatId: string, messageId: number, notes: string) {
+    const target = this.educationPath(chatId, messageId);
+    await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    const temp = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temp, await compress(Buffer.from(notes, 'utf8')), { mode: 0o600 });
+      await rename(temp, target);
+    } catch (error) {
+      await unlink(temp).catch(() => {});
+      throw error;
+    }
+    await this.pruneEducationNotes();
+  }
+  async readEducationNotes(chatId: string, messageId: number): Promise<string | null> {
+    const target = this.educationPath(chatId, messageId);
+    try {
+      const info = await stat(target);
+      if (info.mtimeMs < Date.now() - educationRetentionMs || info.size > 2 * 1024 * 1024)
+        return null;
+      return (await decompress(await readFile(target))).toString('utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+  private async pruneEducationNotes() {
+    const dir = path.join(this.dir, 'education-notes');
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for (const name of names) {
+      if (!/^-?\d+_\d+\.txt\.gz$/.test(name)) continue;
+      const file = path.join(dir, name);
+      if ((await stat(file)).mtimeMs < Date.now() - educationRetentionMs) await unlink(file);
+    }
   }
   private async read<T>(name: string, fallback: T): Promise<T> {
     try {

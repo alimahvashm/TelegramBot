@@ -988,6 +988,9 @@ function Dashboard({ logout }: { logout: () => void }) {
                     Send <code>/summary</code> in any connected chat, or <code>/summary 50</code>{' '}
                     for a little more context.
                   </p>
+                  <p>
+                    Reply to an Education PDF with <code>/question Your question</code> to ask about its notes.
+                  </p>
                 </div>
                 <span className="badge neutral">Up to 100 messages</span>
               </div>

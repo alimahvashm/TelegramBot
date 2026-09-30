@@ -3,7 +3,7 @@ import type { Config } from '../shared/config.js';
 import { summaryCount } from '../shared/config.js';
 import { AudioService, MAX_BYTES, MAX_SECONDS } from './audio.js';
 import { AppError, boundedBody, delay, fetchJson } from './http.js';
-import { createEducationNotes, summarize } from './providers.js';
+import { answerEducationQuestion, createEducationNotes, summarize } from './providers.js';
 import { renderEducationPdf } from './education-pdf.js';
 import { Store, type Chat } from './store.js';
 
@@ -52,6 +52,7 @@ export class TelegramBot {
   private controls = Promise.resolve();
   private educationTimes = new Map<string, number>();
   private summaryTimes = new Map<string, number>();
+  private questionTimes = new Map<string, number>();
   constructor(
     private store: Store,
     private audio: AudioService,
@@ -203,7 +204,7 @@ export class TelegramBot {
       new Blob([new Uint8Array(pdf)], { type: 'application/pdf' }),
       'education-notes.pdf',
     );
-    const result = await fetchJson<{ ok: boolean }>(
+    const result = await fetchJson<{ ok: boolean; result: { message_id: number } }>(
       `https://api.telegram.org/bot${token}/sendDocument`,
       {
         method: 'POST',
@@ -212,6 +213,7 @@ export class TelegramBot {
       120000,
     );
     if (!result.ok) throw new AppError('Telegram did not accept the PDF document.', 502);
+    return result.result.message_id;
   }
   private chat(message: Message, config: Config): Chat {
     const id = String(message.chat.id);
@@ -287,6 +289,10 @@ export class TelegramBot {
       }
       if (command === 'education') {
         await this.education(token, message, chat, config);
+        return;
+      }
+      if (command === 'question') {
+        await this.question(token, message, chat, config, argument?.trim());
         return;
       }
       if (command === 'summary') {
@@ -452,7 +458,10 @@ export class TelegramBot {
           message_id: progress.message_id,
           text: '📄 در حال آماده‌سازی فایل PDF…',
         }).catch(() => {});
-        await this.sendPdf(token, message, await this.pdfRenderer(output));
+        const documentId = await this.sendPdf(token, message, await this.pdfRenderer(output));
+        await this.store.saveEducationNotes(chat.id, documentId, output).catch(() => {
+          this.store.log('error', `Could not save Education PDF notes for chat ${chat.id}.`);
+        });
         this.store.log('info', `Education PDF delivered to chat ${chat.id}.`);
         output = '📄 جزوهٔ آموزشی به صورت PDF ارسال شد.';
       } catch (error) {
@@ -469,6 +478,74 @@ export class TelegramBot {
       message_id: progress.message_id,
       text: output,
     });
+  }
+
+  private async question(
+    token: string,
+    message: Message,
+    chat: Chat,
+    config: Config,
+    question?: string,
+  ) {
+    if (!question) {
+      await this.reply(token, message, 'روی فایل PDF جزوه ریپلای کنید و بنویسید: /question سوال شما');
+      return;
+    }
+    if (question.length > 2000) {
+      await this.reply(token, message, 'پرسش باید کوتاه‌تر از ۲۰۰۰ نویسه باشد.');
+      return;
+    }
+    const source = message.reply_to_message;
+    if (
+      !source?.document ||
+      source.document.file_name !== 'education-notes.pdf' ||
+      source.from?.id !== this.status.bot?.id
+    ) {
+      await this.reply(token, message, 'برای پرسیدن سؤال، روی فایل PDF جزوه‌ای که این ربات ساخته ریپلای کنید.');
+      return;
+    }
+    const notes = await this.store.readEducationNotes(chat.id, source.message_id);
+    if (!notes) {
+      await this.reply(token, message, 'متن این جزوه ذخیره نشده است. لطفاً دوباره با /education آن را بسازید و سپس سؤال بپرسید.');
+      return;
+    }
+    if (Date.now() - (this.questionTimes.get(chat.id) || 0) < 10000) {
+      await this.reply(token, message, 'لطفاً چند ثانیه صبر کنید و دوباره سؤال بپرسید.');
+      return;
+    }
+    this.questionTimes.set(chat.id, Date.now());
+    const progress = await this.call<{ message_id: number }>(token, 'sendMessage', {
+      chat_id: message.chat.id,
+      text: '⏳ در حال بررسی جزوه و آماده‌سازی پاسخ…',
+      reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+    });
+    let answer: string;
+    try {
+      const result = await answerEducationQuestion(
+        config,
+        notes,
+        question,
+        (msg) => this.store.log('warn', msg),
+        async (done, total) => {
+          await this.call(token, 'editMessageText', {
+            chat_id: chat.id,
+            message_id: progress.message_id,
+            text: `⏳ بررسی جزوه: بخش ${done} از ${total}`,
+          }).catch(() => {});
+        },
+      );
+      answer = result.text;
+    } catch (error) {
+      this.store.log('warn', `Education question failed${error instanceof AppError ? ` (HTTP ${error.status})` : ''}.`);
+      answer = 'پاسخ‌دهی به پرسش موقتاً ممکن نیست. لطفاً دسترسی و سهمیهٔ مدل را بررسی کنید و دوباره تلاش کنید.';
+    }
+    const parts = chunks(answer);
+    await this.call(token, 'editMessageText', {
+      chat_id: chat.id,
+      message_id: progress.message_id,
+      text: parts[0],
+    });
+    for (const part of parts.slice(1)) await this.reply(token, message, part);
   }
 
   private async summary(

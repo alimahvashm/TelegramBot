@@ -71,12 +71,77 @@ export async function createEducationNotes(
   return { ...last, text: notes.join('\n\n──────────\n\n'), durationMs: Date.now() - started };
 }
 
+const questionPrompt = `به پرسش کاربر فقط بر اساس جزوهٔ آموزشی داده‌شده پاسخ بده.
+پاسخ را به فارسی، روشن و مستقیم بنویس و اگر لازم بود به بخش مرتبط جزوه اشاره کن.
+اگر پاسخ در جزوه نیست یا اطلاعات کافی نیست، صریح بگو که جزوه پاسخ را مشخص نمی‌کند.
+اطلاعات بیرونی، حدس و نکته‌ای خارج از جزوه اضافه نکن.`;
+
+export async function answerEducationQuestion(
+  config: Config,
+  notes: string,
+  question: string,
+  log: (message: string) => void = () => {},
+  progress?: (done: number, total: number) => Promise<void>,
+) {
+  if (!question.trim() || question.length > 2000) throw new AppError('Invalid question.', 400);
+  if (!notes.trim()) throw new AppError('This Education PDF has no saved notes.', 422);
+  const input = (part: string) =>
+    `پرسش: ${JSON.stringify(question)}\nمتن جزوه: ${JSON.stringify(part)}`;
+  if (notes.length <= 45000)
+    return generateText(config, questionPrompt, input(notes), 2200, 'question', log);
+
+  const sections: string[] = [];
+  let remaining = notes;
+  while (remaining.length > 18000) {
+    const boundary = Math.max(remaining.lastIndexOf('\n', 18000), remaining.lastIndexOf(' ', 18000));
+    const end = boundary > 9000 ? boundary + 1 : 18000;
+    sections.push(remaining.slice(0, end));
+    remaining = remaining.slice(end);
+  }
+  if (remaining.trim()) sections.push(remaining);
+  const findings: string[] = [];
+  for (const [index, section] of sections.entries()) {
+    await progress?.(index + 1, sections.length);
+    const result = await generateText(
+      config,
+      `${questionPrompt}\nاین فقط یک بخش از جزوه است. اگر پاسخ در این بخش نیست، فقط NO_ANSWER را بنویس.`,
+      input(section),
+      1500,
+      'question',
+      log,
+    );
+    if (!/^NO_ANSWER[.!\s]*$/i.test(result.text)) findings.push(result.text);
+  }
+  if (!findings.length)
+    return { text: 'این جزوه پاسخ این پرسش را مشخص نمی‌کند.', provider: '', model: '', fallback: false, durationMs: 0 };
+  if (findings.length === 1)
+    return { text: findings[0], provider: '', model: '', fallback: false, durationMs: 0 };
+  let answers = findings;
+  let combined!: Awaited<ReturnType<typeof generateText>>;
+  while (answers.length > 1) {
+    const next: string[] = [];
+    for (let index = 0; index < answers.length; index += 4) {
+      combined = await generateText(
+        config,
+        `${questionPrompt}\nپاسخ‌های بخش‌های مختلف جزوه را بدون حذف نکات مرتبط یا تکرار ترکیب کن.`,
+        `پرسش: ${JSON.stringify(question)}\nپاسخ‌های مستند: ${JSON.stringify(answers.slice(index, index + 4))}`,
+        2200,
+        'question',
+        log,
+      );
+      next.push(combined.text);
+    }
+    answers = next;
+  }
+  return { ...combined, text: answers[0] };
+}
+
 async function generateText(
   config: Config,
   system: string,
   input: string,
   maxTokens: number,
-  task: 'summary' | 'education',
+  task: 'summary' | 'education' | 'question',
   log: (message: string) => void,
 ) {
   const candidates: { provider: string; url: string; key: string; model: string }[] = [];
@@ -131,7 +196,7 @@ async function generateText(
                 max_tokens: maxTokens,
               }),
             },
-            task === 'education' ? 90000 : 45000,
+            task === 'summary' ? 45000 : 90000,
           ),
         1,
       );

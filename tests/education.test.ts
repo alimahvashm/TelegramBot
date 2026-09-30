@@ -143,6 +143,7 @@ test('reply education transcribes the target, delivers long notes, enforces limi
   assert.equal(calls.find((c) => c.method === 'getFile')?.body.file_id, 'target-voice');
   assert.deepEqual(pdfInputs, [notes.trim()]);
   assert.equal(calls.filter((c) => c.method === 'sendDocument').length, 1);
+  assert.equal(await store.readEducationNotes('2', 901), notes.trim());
   assert.match(String(calls.at(-1)?.body.text), /PDF ارسال شد/);
   await handle(2);
   assert.equal(modelCalls, 1);
