@@ -169,6 +169,12 @@ class TelegramBot:
         chat_data = message['chat']
         chat_id = str(chat_data['id'])
         chats = self.store.state['chats']
+        metrics = self.store.state['metrics']
+        if chat_id not in chats:
+            if chat_data['type'] in ('group', 'supergroup'):
+                metrics['groupsSeen'] += 1
+            elif chat_data['type'] == 'private':
+                metrics['privateChatsSeen'] += 1
         chat = chats.get(chat_id) or {'id': chat_id, 'title': '', 'type': chat_data['type'],
             'language': config['language'], 'enabled': True, 'memberCount': None, 'membersUpdatedAt': 0,
             'messageCount': 0, 'audioCount': 0, 'pdfCount': 0, 'lastPdfAt': None,
@@ -177,10 +183,18 @@ class TelegramBot:
         chat['title'] = chat_data.get('title') or chat_data.get('first_name') or f'Chat {chat_id}'
         chat['type'] = chat_data['type']
         chat['lastActive'] = int(time.time() * 1000)
-        chat['messageCount'] += 1
-        today = datetime.now(timezone.utc).date().isoformat()
-        daily = chat.setdefault('dailyMessages', {})
-        daily[today] = daily.get(today, 0) + 1
+        message_id = message['message_id']
+        if message_id > chat.get('lastCountedMessageId', 0):
+            chat['lastCountedMessageId'] = message_id
+            chat['messageCount'] += 1
+            today = datetime.now(timezone.utc).date().isoformat()
+            daily = chat.setdefault('dailyMessages', {})
+            daily[today] = daily.get(today, 0) + 1
+            if message.get('sticker'):
+                metrics['stickersSeen'] += 1
+            if message.get('voice') or message.get('audio') or message.get('video_note'):
+                chat['audioCount'] += 1
+                metrics['voiceMessagesSeen'] += 1
         chats[chat_id] = chat
         if message.get('from'):
             self.store.state['users'][str(message['from']['id'])] = int(time.time() * 1000)
@@ -235,6 +249,8 @@ class TelegramBot:
                 await self.image(token, message, chat, config); return
             if command == 'summary':
                 await self.summary(token, message, chat, config, argument); return
+            if command == 'stats':
+                await self.stats(token, message); return
         sender = ' '.join(filter(None, [message.get('from', {}).get('first_name'), message.get('from', {}).get('last_name')])) or message.get('sender_chat', {}).get('title') or 'Unknown'
         def remember(text):
             self.store.remember(chat, {'messageId': message['message_id'], 'timestamp': message.get('date', 0) * 1000,
@@ -249,7 +265,6 @@ class TelegramBot:
         media = message.get('voice') or message.get('audio') or message.get('video_note')
         if not media:
             return
-        chat['audioCount'] += 1
         self.store.state['metrics']['processed'] += 1
         self.store.log('info', f'Incoming audio in chat {chat["id"]}.')
         try:
@@ -267,6 +282,18 @@ class TelegramBot:
         if config['autoReply']:
             await self.reply(token, message, transcription)
             self.store.log('info', f'Transcript reply delivered to chat {chat["id"]}.')
+
+    async def stats(self, token: str, message: dict):
+        metrics = self.store.state['metrics']
+        started = datetime.fromtimestamp(metrics['stickerTrackingStartedAt'] / 1000, timezone.utc).strftime('%Y-%m-%d')
+        await self.reply(token, message,
+            '📊 آمار ربات\n\n'
+            f'🎭 استیکرهای دریافت‌شده: {metrics["stickersSeen"]:,}\n'
+            f'🎤 پیام‌های صوتی (ویس، فایل صوتی و ویدیو نوت): {metrics["voiceMessagesSeen"]:,}\n'
+            f'👥 گروه‌ها: {metrics["groupsSeen"]:,}\n'
+            f'👤 چت‌های خصوصی: {metrics["privateChatsSeen"]:,}\n'
+            f'📄 PDFهای ساخته‌شده: {metrics["pdfsGenerated"]:,}\n\n'
+            f'شمارش استیکرها از {started} شروع شده است؛ آمار قدیمی‌تر آن در دسترس نیست.')
 
     async def transcribe_media(self, token: str, media: dict, config: dict, language: str, progress=None):
         if media.get('file_size', 0) > MAX_BYTES or media.get('duration', 0) > MAX_SECONDS:

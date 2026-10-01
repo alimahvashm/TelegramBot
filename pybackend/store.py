@@ -38,6 +38,12 @@ class Store:
         metrics.setdefault('pdfTrackingStartedAt', int(time.time() * 1000))
         for key in ('pdfsGenerated', 'groupPdfs', 'privatePdfs'):
             metrics.setdefault(key, 0)
+        chats = list(self.state['chats'].values())
+        metrics.setdefault('groupsSeen', sum(chat.get('type') in ('group', 'supergroup') for chat in chats))
+        metrics.setdefault('privateChatsSeen', sum(chat.get('type') == 'private' for chat in chats))
+        metrics.setdefault('voiceMessagesSeen', sum(chat.get('audioCount', 0) for chat in chats))
+        metrics.setdefault('stickersSeen', 0)
+        metrics.setdefault('stickerTrackingStartedAt', int(time.time() * 1000))
         for chat in self.state['chats'].values():
             chat.setdefault('pdfCount', 0)
             chat.setdefault('lastPdfAt', None)
