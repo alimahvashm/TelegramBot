@@ -50,8 +50,7 @@ def test_stats_migrates_known_counts_and_tracks_new_messages(tmp_path):
         assert metrics['stickersSeen'] == 1
         assert metrics['voiceMessagesSeen'] == 5
         assert all(part in sent[-1] for part in ('استیکرهای دریافت‌شده: 1', 'پیام‌های صوتی', 'گروه‌ها: 1',
-                                                'چت‌های خصوصی: 1', 'PDFهای ساخته‌شده: 3'))
-        assert 'قدیمی‌تر آن در دسترس نیست' in sent[-1]
+                                                'چت‌های خصوصی: 1', 'پی‌دی‌اف‌های ساخته‌شده: 3'))
         await restored.save_state()
         again = Store(tmp_path)
         await again.init()

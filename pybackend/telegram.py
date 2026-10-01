@@ -285,15 +285,13 @@ class TelegramBot:
 
     async def stats(self, token: str, message: dict):
         metrics = self.store.state['metrics']
-        started = datetime.fromtimestamp(metrics['stickerTrackingStartedAt'] / 1000, timezone.utc).strftime('%Y-%m-%d')
         await self.reply(token, message,
             '📊 آمار ربات\n\n'
             f'🎭 استیکرهای دریافت‌شده: {metrics["stickersSeen"]:,}\n'
             f'🎤 پیام‌های صوتی (ویس، فایل صوتی و ویدیو نوت): {metrics["voiceMessagesSeen"]:,}\n'
             f'👥 گروه‌ها: {metrics["groupsSeen"]:,}\n'
             f'👤 چت‌های خصوصی: {metrics["privateChatsSeen"]:,}\n'
-            f'📄 PDFهای ساخته‌شده: {metrics["pdfsGenerated"]:,}\n\n'
-            f'شمارش استیکرها از {started} شروع شده است؛ آمار قدیمی‌تر آن در دسترس نیست.')
+            f'📄 پی‌دی‌اف‌های ساخته‌شده: {metrics["pdfsGenerated"]:,}')
 
     async def transcribe_media(self, token: str, media: dict, config: dict, language: str, progress=None):
         if media.get('file_size', 0) > MAX_BYTES or media.get('duration', 0) > MAX_SECONDS:
