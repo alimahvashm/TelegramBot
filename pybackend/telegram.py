@@ -11,6 +11,7 @@ from .audio import AudioService, MAX_BYTES, MAX_SECONDS
 from .config import summary_count
 from .errors import AppError, request_json, response_bytes
 from .pdf import render_education_pdf
+from .education_images import MAX_EDUCATION_IMAGES, prepare_education_image
 from .providers import summarize, create_education_notes, answer_education_question, describe_education_image
 from .visual import MAX_VISUAL_BYTES, describe_visual, frames_from_media
 from .store import Store
@@ -34,6 +35,7 @@ class TelegramBot:
         self.summary_times = {}
         self.question_times = {}
         self.pending_images = {}
+        self.album_photos = {}
         self.visual_workers = asyncio.Semaphore(3)
 
     async def close(self):
@@ -107,6 +109,7 @@ class TelegramBot:
                             break
                         if update['update_id'] < poll_offset:
                             continue
+                        self.remember_album_photo(update.get('message') or {})
                         entry = {'id': update['update_id'], 'done': False}
                         pending.append(entry)
                         chat_id = str(update.get('message', {}).get('chat', {}).get('id', f'update:{entry["id"]}'))
@@ -184,6 +187,7 @@ class TelegramBot:
         return chat
 
     async def handle(self, token: str, message: dict, config: dict):
+        self.remember_album_photo(message)
         if message.get('from', {}).get('is_bot'):
             return
         chat = self.chat(message, config)
@@ -204,7 +208,7 @@ class TelegramBot:
             self.pending_images.pop(pending_key, None)
             await self.apply_image(token, message, chat, config, pending['documentId'])
             return
-        command_text = message.get('text') or (message.get('caption') if message.get('caption', '').startswith('/image') else None)
+        command_text = message.get('text') or message.get('caption')
         match = re.fullmatch(r'/(\w+)(?:@([\w]+))?(?:\s+(.*))?', command_text or '', re.S)
         if match and (not match.group(2) or match.group(2).lower() == (self.status['bot'] or {}).get('username', '').lower()):
             command, argument = match.group(1), (match.group(3) or '').strip()
@@ -348,6 +352,35 @@ class TelegramBot:
                            (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')
             await self.reply(token, message, 'توضیح این GIF یا استیکر فعلاً ممکن نشد.')
 
+    def remember_album_photo(self, message: dict):
+        group = message.get('media_group_id')
+        photos = message.get('photo')
+        if not group or not photos or not message.get('chat') or not message.get('message_id'):
+            return
+        now = time.time()
+        for key, entry in list(self.album_photos.items()):
+            if now - entry['time'] > 300:
+                self.album_photos.pop(key, None)
+        key = (str(message['chat']['id']), str(group))
+        entry = self.album_photos.setdefault(key, {'time': now, 'photos': {}})
+        entry['time'] = now
+        entry['photos'][message['message_id']] = photos[-1]
+
+    async def download_education_photo(self, token: str, media: dict) -> bytes:
+        if not media.get('file_id') or media.get('file_size', 0) > MAX_IMAGE:
+            raise AppError('Each photo must be smaller than 5 MB.', 413)
+        file = await self.call(token, 'getFile', {'file_id': media['file_id']})
+        if not file.get('file_path') or file.get('file_size', 0) > MAX_IMAGE:
+            raise AppError('A photo is unavailable or exceeds 5 MB.', 413)
+        response = await self.client.get(f'https://api.telegram.org/file/bot{token}/{file["file_path"]}',
+                                         timeout=30, follow_redirects=False)
+        if response.status_code >= 400:
+            raise AppError('Telegram photo download failed.', 502)
+        return prepare_education_image(await response_bytes(response, MAX_IMAGE))
+
+    async def render_notes(self, notes: str, images: list[bytes]) -> bytes:
+        return await self.pdf_renderer(notes, images) if images else await self.pdf_renderer(notes)
+
     async def education(self, token: str, message: dict, chat: dict, config: dict):
         source = message.get('reply_to_message') or {}
         media = source.get('voice') or source.get('audio') or source.get('video_note')
@@ -362,6 +395,7 @@ class TelegramBot:
             'reply_parameters': {'message_id': message['message_id'], 'allow_sending_without_reply': True}})
         stage = 'transcription'
         notes_ready = False
+        images = []
         self.store.state['metrics']['processed'] += 1
         async def update(text):
             try:
@@ -373,6 +407,27 @@ class TelegramBot:
                 await update(f'⏳ تبدیل صوت به متن: {done} از {total} بخش تکمیل شد.')
             transcript = await self.transcribe_media(token, media, config, chat['language'], transcription_progress)
             self.store.state['metrics']['succeeded'] += 1
+            group = message.get('media_group_id')
+            if group:
+                await asyncio.sleep(2)
+                album = self.album_photos.pop((chat['id'], str(group)), {'photos': {}})['photos']
+                photos = [album[key] for key in sorted(album)]
+            else:
+                photos = [message['photo'][-1]] if message.get('photo') else []
+            if len(photos) > MAX_EDUCATION_IMAGES:
+                raise AppError('Attach no more than 10 photos to /education.', 413)
+            if photos:
+                stage = 'images'
+                details = []
+                for index, photo in enumerate(photos, 1):
+                    await update(f'🖼 در حال خواندن تصویر {index} از {len(photos)}…')
+                    image = await self.download_education_photo(token, photo)
+                    images.append(image)
+                    result = await describe_education_image(config, image, 'image/jpeg', lambda msg: self.store.log('warn', msg))
+                    if not re.fullmatch(r'NO_CONTENT[.!\s]*', result['text'], re.I):
+                        details.append(f'تصویر {index}: {result["text"]}')
+                if details:
+                    transcript += '\n\nمطالب تکمیلی خوانده‌شده از تصاویر پیوست (فقط در چارچوب همین درس):\n' + '\n\n'.join(details)
             stage = 'education'
             async def note_progress(done, total):
                 await update(f'📝 آماده‌سازی جزوه: بخش {done + 1} از {total}')
@@ -385,17 +440,19 @@ class TelegramBot:
                 self.store.state['metrics']['failed'] += 1
             self.store.log('warn', f'Education {stage} failed' + (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')
             output = ('تهیهٔ جزوه موقتاً ممکن نیست. لطفاً دسترسی و سهمیهٔ مدل هوش مصنوعی را بررسی کنید و دوباره تلاش کنید.'
-                      if stage == 'education' else
+                      if stage in ('education', 'images') else
                       'فایل صوتی باید حداکثر ۶۰ دقیقه و کمتر از ۲۰ مگابایت باشد.' if isinstance(exc, AppError) and exc.status == 413 else
                       'گفتار واضحی تشخیص داده نشد یا فایل صوتی قابل خواندن نیست.' if isinstance(exc, AppError) and exc.status == 422 else
                       'تبدیل صوت به متن موقتاً ممکن نیست. لطفاً دوباره تلاش کنید.')
         if notes_ready:
             try:
                 await update('📄 در حال آماده‌سازی فایل PDF…')
-                document_id = await self.send_pdf(token, message, await self.pdf_renderer(output))
+                document_id = await self.send_pdf(token, message, await self.render_notes(output, images))
                 self.store.record_pdf(chat)
                 try:
                     await self.store.save_education_notes(chat['id'], document_id, output)
+                    if images:
+                        await self.store.save_education_images(chat['id'], document_id, images)
                 except Exception:
                     self.store.log('error', f'Could not save Education PDF notes for chat {chat["id"]}.')
                 self.store.log('info', f'Education PDF delivered to chat {chat["id"]}.')
@@ -495,7 +552,8 @@ class TelegramBot:
             if re.fullmatch(r'NO_CONTENT[.!\s]*', result['text'], re.I):
                 raise AppError('No readable educational content was found in the image.', 422)
             updated = original + '\n\n──────────\n\n📷 مطالب تکمیلی از تصویر\n\n' + result['text']
-            pdf = await self.pdf_renderer(updated)
+            images = await self.store.read_education_images(chat['id'], document_id)
+            pdf = await self.render_notes(updated, images)
             new_id = document_id
             edited = True
             try:

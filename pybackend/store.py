@@ -44,6 +44,7 @@ class Store:
             chat.setdefault('describeMedia', False)
         self.prune()
         await self.prune_education_notes()
+        await self.prune_education_images()
 
     def record_pdf(self, chat: dict):
         now = int(time.time() * 1000)
@@ -159,3 +160,48 @@ class Store:
                         file.unlink(missing_ok=True)
                 except FileNotFoundError:
                     pass
+
+    def images_dir(self, chat_id: str, message_id: int) -> Path:
+        self.notes_path(chat_id, message_id)
+        return self.dir / 'education-images' / f'{chat_id}_{message_id}'
+
+    async def save_education_images(self, chat_id: str, message_id: int, images: list[bytes]):
+        from .education_images import MAX_EDUCATION_IMAGES, MAX_STORED_IMAGE
+        if len(images) > MAX_EDUCATION_IMAGES or any(len(image) > MAX_STORED_IMAGE for image in images):
+            raise ValueError('Too many or too large education images.')
+        directory = self.images_dir(chat_id, message_id)
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for index, image in enumerate(images, 1):
+            target = directory / f'{index}.jpg'
+            temp = directory / f'{index}.{uuid4().hex}.tmp'
+            try:
+                temp.write_bytes(image)
+                os.chmod(temp, 0o600)
+                os.replace(temp, target)
+            finally:
+                temp.unlink(missing_ok=True)
+        for old in directory.glob('*.jpg'):
+            if old.stem.isdigit() and int(old.stem) > len(images):
+                old.unlink(missing_ok=True)
+        await self.prune_education_images()
+
+    async def read_education_images(self, chat_id: str, message_id: int) -> list[bytes]:
+        from .education_images import MAX_EDUCATION_IMAGES, MAX_STORED_IMAGE
+        directory = self.images_dir(chat_id, message_id)
+        if not directory.exists() or directory.stat().st_mtime < time.time() - 30 * 86400:
+            return []
+        result = []
+        for index in range(1, MAX_EDUCATION_IMAGES + 1):
+            target = directory / f'{index}.jpg'
+            if not target.exists() or target.stat().st_size > MAX_STORED_IMAGE:
+                break
+            result.append(target.read_bytes())
+        return result
+
+    async def prune_education_images(self):
+        import shutil
+        root = self.dir / 'education-images'
+        if root.exists():
+            for directory in root.iterdir():
+                if directory.is_dir() and re.fullmatch(r'-?\d+_\d+', directory.name) and directory.stat().st_mtime < time.time() - 30 * 86400:
+                    shutil.rmtree(directory)

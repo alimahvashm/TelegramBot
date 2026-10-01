@@ -1,5 +1,6 @@
 """Persian B Nazanin PDF rendering through the WeasyPrint CLI."""
 import asyncio
+import base64
 import html
 import os
 import re
@@ -9,7 +10,7 @@ from .errors import AppError
 ROOT = Path(__file__).resolve().parent.parent
 FONT_DIR = ROOT / 'assets' / 'fonts'
 
-def education_html(notes: str) -> str:
+def education_html(notes: str, images: list[bytes] | None = None) -> str:
     lines = notes.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     blocks, paragraph = [], []
     title_used = False
@@ -39,6 +40,12 @@ def education_html(notes: str) -> str:
         else:
             paragraph.append(line)
     flush()
+    if images:
+        blocks.append('<h2 class="photo-heading">تصاویر پیوست</h2>')
+        for index, photo in enumerate(images, 1):
+            encoded = base64.b64encode(photo).decode('ascii')
+            blocks.append(f'<figure><img src="data:image/jpeg;base64,{encoded}" alt="تصویر {index}">'
+                          f'<figcaption>تصویر {index}</figcaption></figure>')
     return f'''<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>جزوه آموزشی</title>
 <style>
 @font-face {{ font-family: 'B Nazanin'; src: url('{(FONT_DIR / 'BNazanin.ttf').as_uri()}') format('truetype'); font-weight: 400; }}
@@ -51,16 +58,20 @@ h2 {{ font-size: 17pt; color: #24456f; margin: 8mm 0 3mm; }}
 p {{ margin: 0 0 4mm; overflow-wrap: anywhere; orphans: 2; widows: 2; }}
 p.bullet {{ padding-right: 5mm; margin-bottom: 2mm; }}
 hr {{ border: 0; border-top: 1px solid #cbd5e1; margin: 8mm 0; }}
+figure {{ margin: 5mm 0 10mm; break-inside: avoid; text-align: center; }}
+figure img {{ max-width: 100%; max-height: 215mm; object-fit: contain; }}
+figcaption {{ font-size: 11pt; color: #64748b; margin-top: 2mm; }}
+.photo-heading {{ break-before: page; }}
 </style></head><body>{''.join(blocks)}</body></html>'''
 
-async def render_education_pdf(notes: str) -> bytes:
+async def render_education_pdf(notes: str, images: list[bytes] | None = None) -> bytes:
     if not notes.strip():
         raise AppError('No education notes are available for the PDF.', 422)
     try:
         process = await asyncio.create_subprocess_exec(os.getenv('WEASYPRINT_PATH', 'weasyprint'), '-', '-',
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL)
-        output, _ = await asyncio.wait_for(process.communicate(education_html(notes).encode()), 180)
+        output, _ = await asyncio.wait_for(process.communicate(education_html(notes, images).encode()), 180)
     except (OSError, asyncio.TimeoutError):
         if 'process' in locals() and process.returncode is None:
             process.kill(); await process.wait()

@@ -25,11 +25,11 @@ Save the Telegram token in the dashboard and enable polling. Configure Google AS
 - Voice, audio and video notes are transcribed. Audio up to 20 MB and 60 minutes is split into 60-second segments and recombined in order.
 - `/summary` summarizes the last 50 received chat messages; `/summary 100` changes the count, up to 100. In groups, disable Telegram privacy mode so the bot receives ordinary messages. The bot cannot retrieve older messages that Telegram never sent it.
 - `/language fa-IR` and `/language en-US` set recognition language; only group administrators can change a group's language.
-- Reply `/education` to an audio message to transcribe it and generate a Persian study-notes PDF in B Nazanin. The Education prompt is editable in the dashboard.
+- Reply `/education` to an audio message to transcribe it and generate a Persian study-notes PDF in B Nazanin. You can send a photo with `/education` as its caption while replying to the audio, or send a photo album with that caption. Up to 10 photos are read for relevant lecture content and included at the end of the PDF. The Education prompt is editable in the dashboard.
 - Reply `/question Your question` to that PDF to ask about its saved notes. Reply `/image` and attach a JPEG/PNG photo, or send the photo next, to append visible lecture content and update the PDF.
 - `/describe on` enables short Persian replies to GIFs and stickers in that conversation; `/describe off` disables them, and `/describe` shows the current state. It starts off in every group and private chat. Only group administrators can change it in groups. Ordinary videos and video notes are ignored. Telegram group privacy mode must be disabled for the bot to receive ordinary GIF and sticker messages. The feature uses the saved custom API key with `cx/gpt-6-luna(low)` (or `gpt-6-luna` at the official OpenAI endpoint); `VISUAL_MODEL` can override the model ID if your compatible router uses another name. Animated TGS stickers use Telegram's still thumbnail when available.
 
-The model must support image input for `/image`. Education source notes are stored privately for 30 days under `DATA_DIR/education-notes`. The bot processes messages in order within each chat while different chats can run concurrently.
+The model must support image input for `/image` and photo attachments to `/education`. Education source notes and small copies of attached photos are stored privately for 30 days under `DATA_DIR/education-notes` and `DATA_DIR/education-images`. The bot processes messages in order within each chat while different chats can run concurrently.
 
 ## Data and security
 

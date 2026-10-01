@@ -47,7 +47,9 @@ if "${compose[@]}" up -d --wait --wait-timeout 120; then
       rm -rf -- "$old_release"
     fi
   done
-  docker image prune --force >/dev/null
+  # Reclaim build cache and dangling layers after every healthy deployment.
+  docker builder prune --all --force >/dev/null || echo 'Could not prune Docker build cache.' >&2
+  docker image prune --force >/dev/null || echo 'Could not prune dangling images.' >&2
 else
   echo 'New deployment failed its health check.' >&2
   "${compose[@]}" logs --tail 40 >&2
