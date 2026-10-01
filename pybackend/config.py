@@ -17,6 +17,7 @@ class Config(BaseModel):
     transcribeMode: str = 'google_asr'
     language: str = 'fa-IR'
     autoReply: bool = True
+    polishTranscript: bool = True
     startMessage: str = Field(default='Hello! Send me a voice or video note and I will transcribe it. Add me to groups and use /summary to summarize conversations. Use /language fa-IR or /language en-US to change recognition language.', min_length=1, max_length=3500)
     llmBrain: str = 'server_cloud'
     chatGptApiKey: str = Field(default='', max_length=512)

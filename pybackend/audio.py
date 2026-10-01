@@ -9,7 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 from .errors import AppError
-from .providers import transcribe
+from .providers import transcribe, polish_transcript
 
 MAX_BYTES = 20 * 1024 * 1024
 MAX_SECONDS = 3600
@@ -100,9 +100,11 @@ class AudioService:
                     raise AppError('No speech was recognized. Try a clearer recording.', 422)
                 if progress:
                     await progress(total, total)
+                raw_text = '\n\n'.join(transcripts)
+                text = await polish_transcript(config, raw_text, self.log)
                 duration_ms = int((time.monotonic() - started) * 1000)
                 self.log(f'Transcription completed in {duration_ms / 1000:.1f}s.')
-                result = {'text': '\n\n'.join(transcripts), 'durationMs': duration_ms,
+                result = {'text': text, 'durationMs': duration_ms,
                           'engine': config['transcribeMode'], 'language': language or config['language'],
                           'audioSeconds': duration, 'segments': total}
                 if downloadable:

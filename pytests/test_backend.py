@@ -32,10 +32,11 @@ def test_dashboard_auth_config_and_state(tmp_path):
                 assert (await client.get('/api/bot/config')).status_code == 401
                 assert (await client.post('/api/auth/login', json={'password': 'wrong'})).status_code == 401
                 assert (await client.post('/api/auth/login', json={'password': 'abcdefghijklmnop'})).status_code == 200
-                response = await client.post('/api/bot/config', json={'educationSystemPrompt': 'جزوهٔ مرتب', 'chatGptApiKey': 'secret'})
+                response = await client.post('/api/bot/config', json={'educationSystemPrompt': 'جزوهٔ مرتب', 'chatGptApiKey': 'secret', 'polishTranscript': False})
                 assert response.status_code == 200
                 assert response.json()['config']['chatGptApiKey'] == '••••••••'
                 assert response.json()['config']['educationSystemPrompt'] == 'جزوهٔ مرتب'
+                assert response.json()['config']['polishTranscript'] is False
                 assert (await client.post('/api/bot/config', json={'unknown': True})).status_code == 400
                 assert (await client.post('/api/bot/config', json={'language': 'invalid'})).status_code == 400
                 assert (await client.get('/api/bot/audience')).status_code == 200
@@ -44,6 +45,7 @@ def test_dashboard_auth_config_and_state(tmp_path):
         await store.init()
         assert store.config['educationSystemPrompt'] == 'جزوهٔ مرتب'
         assert store.config['chatGptApiKey'] == 'secret'
+        assert store.config['polishTranscript'] is False
     run(scenario())
 
 

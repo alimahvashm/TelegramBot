@@ -757,6 +757,12 @@ function Dashboard({ logout }: { logout: () => void }) {
                     checked={config.autoReply}
                     onChange={(v) => change('autoReply', v)}
                   />
+                  <Toggle
+                    label="Clean up transcripts"
+                    description="Use the low-cost Luna model for punctuation, paragraph breaks, and only obvious word fixes. Keep the raw transcript if the model is unavailable or changes too much."
+                    checked={config.polishTranscript}
+                    onChange={(v) => change('polishTranscript', v)}
+                  />
                   <hr />
                   <Field label="Welcome message" hint="Sent when someone uses /start.">
                     <textarea

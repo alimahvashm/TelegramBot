@@ -18,6 +18,7 @@ export const configSchema = z.object({
   transcribeMode: z.enum(['google_asr', 'fastapi', 'gemini']).default('google_asr'),
   language: z.enum(['fa-IR', 'en-US']).default('fa-IR'),
   autoReply: z.boolean().default(true),
+  polishTranscript: z.boolean().default(true),
   startMessage: z
     .string()
     .min(1)

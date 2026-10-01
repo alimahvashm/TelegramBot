@@ -56,10 +56,13 @@ def test_audio_conversion_and_segmentation(monkeypatch):
         seen.append((wav_path.read_bytes()[:4], language))
         return 'متن آزمایشی'
     monkeypatch.setattr('pybackend.audio.transcribe', fake_transcribe)
+    cleanup = AsyncMock(return_value='متن آزمایشی.')
+    monkeypatch.setattr('pybackend.audio.polish_transcript', cleanup)
     config = Config().model_dump()
     config['transcribeMode'] = 'fastapi'
     result = run(AudioService().process(wav, config, 'fa-IR', True))
-    assert result['text'] == 'متن آزمایشی'
+    assert result['text'] == 'متن آزمایشی.'
+    cleanup.assert_awaited_once()
     assert result['segments'] == 1
     assert result['wavBase64']
     assert seen == [(b'RIFF', 'fa-IR')]

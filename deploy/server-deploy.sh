@@ -3,9 +3,16 @@ set -euo pipefail
 
 release=${1:?Provide the release directory}
 [[ "$release" =~ ^/opt/telegrambot/releases/[0-9a-f]{40}$ ]] || { echo 'Invalid release path'; exit 1; }
+exec 9>/opt/telegrambot/deploy.lock
+flock -w 180 9
 test -f /opt/telegrambot/shared/.env || { echo 'Create /opt/telegrambot/shared/.env with ADMIN_PASSWORD before deployment.'; exit 1; }
 command -v docker >/dev/null
 docker compose version >/dev/null
+if [[ "$(readlink /opt/telegrambot/current || true)" == "$release" &&
+      "$(docker inspect telegrambot-app-1 --format '{{.State.Health.Status}}' 2>/dev/null || true)" == healthy ]]; then
+  echo 'Release is already active and healthy.'
+  exit 0
+fi
 install -d -m 700 -o 1000 -g 1000 /opt/telegrambot/shared/data
 
 revision=${release##*/}
@@ -26,7 +33,7 @@ if ! docker image inspect "$DEPLOY_IMAGE" >/dev/null 2>&1; then
     docker build --tag "$DEPLOY_IMAGE" "$release"
   fi
 fi
-"${compose[@]}" stop --timeout 240
+"${compose[@]}" stop --timeout 1
 if "${compose[@]}" up -d --wait --wait-timeout 120; then
   ln -sfn "$release" /opt/telegrambot/current.next
   mv -Tf /opt/telegrambot/current.next /opt/telegrambot/current
