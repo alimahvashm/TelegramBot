@@ -759,7 +759,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                   />
                   <Toggle
                     label="Clean up transcripts"
-                    description="Use the low-cost Luna model for punctuation, paragraph breaks, and only obvious word fixes. Keep the raw transcript if the model is unavailable or changes too much."
+                    description="Use GPT-6.1 Sol with low reasoning to correct spelling and unusual ASR words, then organize the transcript into clear sentences and paragraphs."
                     checked={config.polishTranscript}
                     onChange={(v) => change('polishTranscript', v)}
                   />
