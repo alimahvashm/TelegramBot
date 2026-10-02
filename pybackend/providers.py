@@ -36,7 +36,7 @@ async def polish_transcript(config: dict, transcript: str, log=lambda message: N
         return transcript
     base_url = config['chatGptBaseUrl'].rstrip('/')
     model = os.getenv('TRANSCRIPT_POLISH_MODEL') or (
-        'gpt-6.1-sol' if base_url == 'https://api.openai.com/v1' else 'cx/gpt-6.1-sol(low)')
+        'gpt-6-sol' if base_url == 'https://api.openai.com/v1' else 'cx/gpt-6-sol(low)')
     sections = split_text(transcript, 5000, 2500)
     polished = []
     async with httpx.AsyncClient() as client:

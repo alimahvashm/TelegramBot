@@ -11,8 +11,8 @@ def run(coro):
 
 
 @pytest.mark.parametrize('base_url,model', [
-    ('https://router.wizdin.xyz/v1', 'cx/gpt-6.1-sol(low)'),
-    ('https://api.openai.com/v1', 'gpt-6.1-sol'),
+    ('https://router.wizdin.xyz/v1', 'cx/gpt-6-sol(low)'),
+    ('https://api.openai.com/v1', 'gpt-6-sol'),
 ])
 def test_cleanup_returns_rewritten_transcript(monkeypatch, base_url, model):
     monkeypatch.delenv('TRANSCRIPT_POLISH_MODEL', raising=False)

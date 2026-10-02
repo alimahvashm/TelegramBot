@@ -759,7 +759,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                   />
                   <Toggle
                     label="Clean up transcripts"
-                    description="Use GPT-6.1 Sol with low reasoning to correct spelling and unusual ASR words, then organize the transcript into clear sentences and paragraphs."
+                    description="Use GPT-6 Sol with low reasoning to correct spelling and unusual ASR words, then organize the transcript into clear sentences and paragraphs."
                     checked={config.polishTranscript}
                     onChange={(v) => change('polishTranscript', v)}
                   />
