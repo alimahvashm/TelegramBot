@@ -3,6 +3,7 @@ import prompts from './prompts.json';
 import { defaultEducationPrompt } from './education-prompt.js';
 
 export const defaultPrompt = prompts.summary;
+export const defaultProfilePrompt = prompts.profile;
 
 const key = z.string().trim().max(512);
 export const configSchema = z.object({
@@ -54,6 +55,7 @@ export const configSchema = z.object({
   googleSpeechApiKey: key.default(''),
   summarySystemPrompt: z.string().min(1).max(12000).default(defaultPrompt),
   educationSystemPrompt: z.string().min(1).max(12000).default(defaultEducationPrompt),
+  profileSystemPrompt: z.string().min(1).max(12000).default(defaultProfilePrompt),
 });
 export type Config = z.infer<typeof configSchema>;
 export const secretFields = [

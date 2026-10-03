@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import {
   configSchema,
+  defaultProfilePrompt,
   defaultPrompt,
   secretFields,
   type Config,
@@ -966,6 +967,28 @@ function Dashboard({ logout }: { logout: () => void }) {
                   <div className="prompt-meta">
                     <span>Used for /education in every group</span>
                     <span>{config.educationSystemPrompt.length.toLocaleString()} / 12,000</span>
+                  </div>
+                  <div className="prompt-label mt-5">
+                    <label htmlFor="profile-prompt">Profile system prompt</label>
+                    <button
+                      className="text-button"
+                      onClick={() => change('profileSystemPrompt', defaultProfilePrompt)}
+                    >
+                      <RefreshCw size={12} />
+                      Reset to default
+                    </button>
+                  </div>
+                  <textarea
+                    id="profile-prompt"
+                    dir="auto"
+                    rows={10}
+                    value={config.profileSystemPrompt}
+                    maxLength={12000}
+                    onChange={(e) => change('profileSystemPrompt', e.target.value)}
+                  />
+                  <div className="prompt-meta">
+                    <span>Used for /profile. Keep the JSON fields and evidence IDs in the prompt.</span>
+                    <span>{config.profileSystemPrompt.length.toLocaleString()} / 12,000</span>
                   </div>
                   <button
                     className="button secondary w-full mt-5"

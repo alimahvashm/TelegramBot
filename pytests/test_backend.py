@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import json
 import os
 import time
 import sys
@@ -11,7 +12,7 @@ os.environ['ADMIN_PASSWORD'] = 'abcdefghijklmnop'
 os.environ['COOKIE_SECURE'] = 'false'
 from pybackend.app import create_app
 from pybackend.audio import AudioService
-from pybackend.config import merge_config, public_config
+from pybackend.config import PROMPTS, merge_config, public_config
 from pybackend.pdf import render_education_pdf
 from pybackend.store import Store
 from pybackend.telegram import TelegramBot
@@ -32,10 +33,11 @@ def test_dashboard_auth_config_and_state(tmp_path):
                 assert (await client.get('/api/bot/config')).status_code == 401
                 assert (await client.post('/api/auth/login', json={'password': 'wrong'})).status_code == 401
                 assert (await client.post('/api/auth/login', json={'password': 'abcdefghijklmnop'})).status_code == 200
-                response = await client.post('/api/bot/config', json={'educationSystemPrompt': 'جزوهٔ مرتب', 'chatGptApiKey': 'secret', 'polishTranscript': False})
+                response = await client.post('/api/bot/config', json={'educationSystemPrompt': 'جزوهٔ مرتب', 'profileSystemPrompt': 'پرامپت کارت سفارشی', 'chatGptApiKey': 'secret', 'polishTranscript': False})
                 assert response.status_code == 200
                 assert response.json()['config']['chatGptApiKey'] == '••••••••'
                 assert response.json()['config']['educationSystemPrompt'] == 'جزوهٔ مرتب'
+                assert response.json()['config']['profileSystemPrompt'] == 'پرامپت کارت سفارشی'
                 assert response.json()['config']['polishTranscript'] is False
                 assert (await client.post('/api/bot/config', json={'unknown': True})).status_code == 400
                 assert (await client.post('/api/bot/config', json={'language': 'invalid'})).status_code == 400
@@ -44,6 +46,7 @@ def test_dashboard_auth_config_and_state(tmp_path):
                 assert (await client.get('/api/bot/config')).status_code == 401
         await store.init()
         assert store.config['educationSystemPrompt'] == 'جزوهٔ مرتب'
+        assert store.config['profileSystemPrompt'] == 'پرامپت کارت سفارشی'
         assert store.config['chatGptApiKey'] == 'secret'
         assert store.config['polishTranscript'] is False
     run(scenario())
@@ -60,6 +63,18 @@ def test_existing_persisted_notes_and_config(tmp_path):
         assert public_config(config)['chatGptApiKey'] != 'secret'
         assert merge_config(config, {'chatGptApiKey': ''})['chatGptApiKey'] == 'secret'
         assert merge_config(config, {'clearSecrets': ['chatGptApiKey']})['chatGptApiKey'] == ''
+    run(scenario())
+
+
+def test_existing_config_gets_default_profile_prompt(tmp_path):
+    async def scenario():
+        store = Store(tmp_path)
+        await store.init()
+        old_config = {key: value for key, value in store.config.items() if key != 'profileSystemPrompt'}
+        (tmp_path / 'bot_config.json').write_text(json.dumps(old_config))
+        restored = Store(tmp_path)
+        await restored.init()
+        assert restored.config['profileSystemPrompt'] == PROMPTS['profile']
     run(scenario())
 
 

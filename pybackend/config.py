@@ -30,6 +30,7 @@ class Config(BaseModel):
     googleSpeechApiKey: str = Field(default='', max_length=512)
     summarySystemPrompt: str = Field(default=PROMPTS['summary'], min_length=1, max_length=12000)
     educationSystemPrompt: str = Field(default=PROMPTS['education'], min_length=1, max_length=12000)
+    profileSystemPrompt: str = Field(default=PROMPTS['profile'], min_length=1, max_length=12000)
 
     @field_validator(*SECRETS)
     @classmethod

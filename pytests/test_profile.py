@@ -72,10 +72,11 @@ def test_profile_uses_sol_medium_and_rejects_invented_evidence(monkeypatch):
         return {'choices': [{'message': {'content': json.dumps(card)}}]}
     monkeypatch.setattr('pybackend.profile.httpx.AsyncClient', FakeClient)
     monkeypatch.setattr('pybackend.profile.request_json', fake_request)
-    config = {'chatGptApiKey': 'test', 'chatGptBaseUrl': 'https://router.wizdin.xyz/v1'}
+    config = {'chatGptApiKey': 'test', 'chatGptBaseUrl': 'https://router.wizdin.xyz/v1', 'profileSystemPrompt': 'پرامپت سفارشی کارت'}
     card = run(generate_profile(config, '5', [{'id':'1','author_id':'5','timestamp':1,'text':'سلام'}]))
     assert observed['model'] == 'cx/gpt-6-sol(medium)'
     assert observed['reasoning_effort'] == 'medium'
+    assert observed['messages'][0]['content'] == 'پرامپت سفارشی کارت'
     assert card['chat_personality'] is None
     assert 'analysis_authorized' not in json.loads(observed['messages'][1]['content'])
 
