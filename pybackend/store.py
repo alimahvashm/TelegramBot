@@ -82,8 +82,7 @@ class Store:
     def prune(self):
         cutoff = time.time() * 1000 - 30 * DAY_MS
         for chat in self.state['chats'].values():
-            chat['history'] = [entry for entry in chat.get('history', [])
-                               if entry.get('timestamp', 0) >= cutoff][-200:]
+            chat['history'] = chat.get('history', [])[-2000:]
             if 'dailyMessages' in chat:
                 chat['dailyMessages'] = {day: count for day, count in chat['dailyMessages'].items()
                                          if self._day_ms(day) >= cutoff}
@@ -107,7 +106,7 @@ class Store:
         history = chat['history']
         history[:] = [item for item in history if item['messageId'] != message['messageId']]
         history.append(message)
-        chat['history'] = history[-200:]
+        chat['history'] = history[-2000:]
 
     def log(self, level: str, message: str):
         clean = message

@@ -15,6 +15,7 @@ from .education_images import MAX_EDUCATION_IMAGES, prepare_education_image
 from .providers import summarize, create_education_notes, answer_education_question, describe_education_image
 from .visual import MAX_VISUAL_BYTES, describe_visual, frames_from_media
 from .store import Store
+from .profile import ProfileArchive, generate_profile, format_profile
 
 MAX_IMAGE = 5 * 1024 * 1024
 
@@ -37,6 +38,7 @@ class TelegramBot:
         self.pending_images = {}
         self.album_photos = {}
         self.visual_workers = asyncio.Semaphore(3)
+        self.profile_archive = ProfileArchive(store.dir)
 
     async def close(self):
         await self.stop()
@@ -241,6 +243,8 @@ class TelegramBot:
                 return
             if command == 'describe':
                 await self.describe_command(token, message, chat, config, argument); return
+            if command == 'profile':
+                await self.profile_command(token, message, chat, config, argument); return
             if command == 'education':
                 await self.education(token, message, chat, config); return
             if command == 'question':
@@ -255,6 +259,23 @@ class TelegramBot:
         def remember(text):
             self.store.remember(chat, {'messageId': message['message_id'], 'timestamp': message.get('date', 0) * 1000,
                 'sender': sender, 'text': text})
+            author = message.get('from') or {}
+            user_id = str(author.get('id', ''))
+            if (chat['type'] in ('group', 'supergroup') and user_id in chat.get('profileConsent', {})
+                    and not message.get('forward_origin') and not message.get('forward_from')
+                    and not message.get('forward_date') and not message.get('via_bot')
+                    and not message.get('is_automatic_forward')
+                    and (message.get('text') or message.get('caption') or message.get('voice')
+                         or message.get('audio') or message.get('video_note'))):
+                username = author.get('username', '').lower()
+                if username:
+                    aliases = chat.setdefault('profileUsernames', {})
+                    for old, mapped_id in list(aliases.items()):
+                        if mapped_id == user_id and old != username:
+                            aliases.pop(old, None)
+                    aliases[username] = user_id
+                self.profile_archive.remember(chat['id'], user_id, message['message_id'],
+                                              message.get('date', 0) * 1000, text)
         text = message.get('text') or message.get('caption') or (f'[Shared file: {message["document"].get("file_name", "unnamed")}]' if message.get('document') else '')
         if text:
             remember(text)
@@ -282,6 +303,68 @@ class TelegramBot:
         if config['autoReply']:
             await self.reply(token, message, transcription)
             self.store.log('info', f'Transcript reply delivered to chat {chat["id"]}.')
+
+    async def profile_command(self, token: str, message: dict, chat: dict, config: dict, argument: str):
+        if chat['type'] not in ('group', 'supergroup'):
+            await self.reply(token, message, 'کارت گفتگویی فقط در گروه فعال است.'); return
+        author = message.get('from') or {}
+        sender_id = str(author.get('id', ''))
+        if not sender_id:
+            await self.reply(token, message, 'شناسهٔ فرستنده مشخص نیست.'); return
+        consent = chat.setdefault('profileConsent', {})
+        names = chat.setdefault('profileUsernames', {})
+        if argument.lower() in ('on', 'off'):
+            if argument.lower() == 'on':
+                consent[sender_id] = True
+                username = author.get('username', '').lower()
+                if username:
+                    names[username] = sender_id
+                await self.reply(token, message, 'کارت گفتگویی برای تو در این گروه فعال شد. پیام‌های بعدی‌ات، تا ۵۰۰ پیام، برای ساخت کارت ثبت می‌شوند. برای لغو و حذفشان /profile off را بفرست.')
+            else:
+                consent.pop(sender_id, None)
+                names = {name: uid for name, uid in names.items() if uid != sender_id}
+                chat['profileUsernames'] = names
+                self.profile_archive.forget(chat['id'], sender_id)
+                await self.reply(token, message, 'رضایتت لغو شد و پیام‌های ذخیره‌شده برای کارت در این گروه حذف شدند.')
+            return
+        source = message.get('reply_to_message') or {}
+        target_id = None
+        target_name = None
+        if argument.lower() == 'me':
+            target_id = sender_id
+            target_name = author.get('first_name') or 'تو'
+        elif re.fullmatch(r'\d+', argument):
+            target_id = argument
+        elif argument.startswith('@') and re.fullmatch(r'@[A-Za-z0-9_]{5,32}', argument):
+            target_id = names.get(argument[1:].lower())
+            target_name = argument
+        elif argument:
+            entities = message.get('entities') or message.get('caption_entities') or []
+            target = next((entity.get('user') for entity in entities
+                           if entity.get('type') == 'text_mention' and entity.get('user')), None)
+            if target:
+                target_id = str(target['id'])
+                target_name = target.get('first_name')
+        elif source.get('from') and not source['from'].get('is_bot'):
+            target_id = str(source['from']['id'])
+            target_name = source['from'].get('first_name')
+        if not target_id:
+            await self.reply(token, message, 'روی پیام فرد ریپلای کن و /profile بفرست، یا /profile @username، /profile شناسه، /profile me را به‌کار ببر. هر فرد باید اول در همین گروه /profile on بفرستد.')
+            return
+        if target_id not in consent:
+            await self.reply(token, message, 'این فرد هنوز در این گروه رضایت نداده است. خودش باید /profile on را بفرستد.')
+            return
+        messages = self.profile_archive.recent(chat['id'], target_id)
+        if not messages:
+            await self.reply(token, message, 'هنوز پیامی پس از فعال‌سازی کارت از این فرد ثبت نشده است.')
+            return
+        try:
+            card = await generate_profile(config, target_id, messages)
+        except Exception:
+            self.store.log('warn', f'Profile generation failed in chat {chat["id"]}.')
+            await self.reply(token, message, 'ساخت کارت فعلاً ممکن نشد. دسترسی یا سهمیهٔ مدل را بررسی کن و دوباره تلاش کن.')
+            return
+        await self.reply(token, message, format_profile(card, target_name or f'کاربر {target_id}', len(messages)))
 
     async def stats(self, token: str, message: dict):
         metrics = self.store.state['metrics']
