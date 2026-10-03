@@ -192,8 +192,6 @@ class TelegramBot:
             today = datetime.now(timezone.utc).date().isoformat()
             daily = chat.setdefault('dailyMessages', {})
             daily[today] = daily.get(today, 0) + 1
-            if message.get('sticker'):
-                metrics['stickersSeen'] += 1
             if message.get('voice') or message.get('audio') or message.get('video_note'):
                 chat['audioCount'] += 1
                 metrics['voiceMessagesSeen'] += 1
@@ -347,12 +345,16 @@ class TelegramBot:
             await self.reply(token, message, 'ساخت کارت فعلاً ممکن نشد. دسترسی یا سهمیهٔ مدل را بررسی کن و دوباره تلاش کن.')
             return
         await self.reply(token, message, format_profile(card, target_name or f'کاربر {target_id}', len(messages)))
+        if message['message_id'] > chat.get('lastProfileMessageId', 0):
+            chat['lastProfileMessageId'] = message['message_id']
+            self.store.state['metrics']['profilesGenerated'] += 1
 
     async def stats(self, token: str, message: dict):
         metrics = self.store.state['metrics']
         await self.reply(token, message,
             '📊 آمار ربات\n\n'
-            f'🎭 استیکرهای دریافت‌شده: {metrics["stickersSeen"]:,}\n'
+            f'🎭 استیکرهای ترجمه‌شده: {metrics["stickersDescribed"]:,}\n'
+            f'👤 پروفایل‌های ساخته‌شده برای کاربران: {metrics["profilesGenerated"]:,}\n'
             f'🎤 پیام‌های صوتی (ویس، فایل صوتی و ویدیو نوت): {metrics["voiceMessagesSeen"]:,}\n'
             f'👥 گروه‌ها: {metrics["groupsSeen"]:,}\n'
             f'👤 چت‌های خصوصی: {metrics["privateChatsSeen"]:,}\n'
@@ -436,6 +438,10 @@ class TelegramBot:
                         frames = []
                 description = await describe_visual(config, frames, kind, emoji)
             await self.reply(token, message, description)
+            if (sticker and re.search(r'[\u0600-\u06FF]', description)
+                    and message['message_id'] > chat.get('lastDescribedStickerMessageId', 0)):
+                chat['lastDescribedStickerMessageId'] = message['message_id']
+                self.store.state['metrics']['stickersDescribed'] += 1
             self.store.log('info', f'Described {kind} in chat {chat["id"]}.')
         except Exception as exc:
             self.store.log('warn', f'{kind} description failed in chat {chat["id"]}' +

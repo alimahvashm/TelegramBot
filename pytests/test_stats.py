@@ -29,7 +29,8 @@ def test_stats_migrates_known_counts_and_tracks_new_messages(tmp_path):
         await restored.init()
         metrics = restored.state['metrics']
         assert (metrics['groupsSeen'], metrics['privateChatsSeen'], metrics['voiceMessagesSeen'],
-                metrics['stickersSeen'], metrics['pdfsGenerated']) == (1, 1, 4, 0, 3)
+                metrics['stickersSeen'], metrics['stickersDescribed'], metrics['profilesGenerated'], metrics['pdfsGenerated']) == (1, 1, 4, 0, 0, 0, 3)
+        metrics['stickersSeen'] = 39  # Legacy received-sticker count is not a description count.
         bot = TelegramBot(restored, AudioService())
         bot.status['bot'] = {'id': 999, 'username': 'testbot'}
         sent = []
@@ -47,14 +48,16 @@ def test_stats_migrates_known_counts_and_tracks_new_messages(tmp_path):
         await bot.handle('token', sticker, restored.config)
         await bot.handle('token', message(20, 'private', 2, voice={'file_id': 'voice-id'}), restored.config)
         await bot.handle('token', message(-10, 'supergroup', 3, text='/stats'), restored.config)
-        assert metrics['stickersSeen'] == 1
+        assert metrics['stickersSeen'] == 39
+        assert metrics['stickersDescribed'] == 0
         assert metrics['voiceMessagesSeen'] == 5
-        assert all(part in sent[-1] for part in ('استیکرهای دریافت‌شده: 1', 'پیام‌های صوتی', 'گروه‌ها: 1',
+        assert all(part in sent[-1] for part in ('استیکرهای ترجمه‌شده: 0', 'پروفایل‌های ساخته‌شده برای کاربران: 0', 'پیام‌های صوتی', 'گروه‌ها: 1',
                                                 'چت‌های خصوصی: 1', 'پی‌دی‌اف‌های ساخته‌شده: 3'))
         await restored.save_state()
         again = Store(tmp_path)
         await again.init()
-        assert again.state['metrics']['stickersSeen'] == 1
+        assert again.state['metrics']['stickersSeen'] == 39
+        assert again.state['metrics']['stickersDescribed'] == 0
         assert again.state['metrics']['voiceMessagesSeen'] == 5
         await bot.close()
     asyncio.run(scenario())

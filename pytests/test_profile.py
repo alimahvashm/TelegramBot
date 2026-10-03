@@ -53,8 +53,10 @@ def test_profile_username_uses_group_messages_without_activation(tmp_path, monke
         assert generate.await_args.args[1] == '5'
         assert [item['text'] for item in generate.await_args.args[2]] == ['first message', 'second message']
         assert 'کارت گفتگویی' in sent[-1]
+        assert store.state['metrics']['profilesGenerated'] == 1
         await bot.handle('token', msg(-1, 6, 6, '/profile unknown'), store.config)
         assert 'از /profile @username استفاده کن' in sent[-1]
+        assert store.state['metrics']['profilesGenerated'] == 1
         await bot.close()
     run(scenario())
 

@@ -43,6 +43,8 @@ class Store:
         metrics.setdefault('privateChatsSeen', sum(chat.get('type') == 'private' for chat in chats))
         metrics.setdefault('voiceMessagesSeen', sum(chat.get('audioCount', 0) for chat in chats))
         metrics.setdefault('stickersSeen', 0)
+        metrics.setdefault('stickersDescribed', 0)
+        metrics.setdefault('profilesGenerated', 0)
         metrics.setdefault('stickerTrackingStartedAt', int(time.time() * 1000))
         for chat in self.state['chats'].values():
             chat.setdefault('pdfCount', 0)

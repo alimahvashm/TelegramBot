@@ -64,11 +64,13 @@ def test_default_off_admin_only_and_chat_isolation(tmp_path, monkeypatch):
         await bot.handle('token', message(-1, 7, animation={'file_id': 'gif-id', 'duration': 2}), store.config)
         await bot.handle('token', message(-1, 8, document={'file_id': 'gif-document', 'mime_type': 'image/gif'}), store.config)
         assert describe.await_count == 3
+        assert store.state['metrics']['stickersDescribed'] == 1
         assert [item[1] for item in sent[-3:]] == ['گربهٔ خندان'] * 3
         assert [item[2] for item in sent[-3:]] == [6, 7, 8]
         await bot.handle('token', message(-1, 9, text='/describe off'), store.config)
         await bot.handle('token', message(-1, 10, sticker=sticker), store.config)
         assert describe.await_count == 3
+        assert store.state['metrics']['stickersDescribed'] == 1
         assert store.state['chats']['-1']['describeMedia'] is False
         await store.save_state()
         restored = Store(tmp_path)
@@ -97,8 +99,37 @@ def test_private_chat_can_enable_and_tgs_uses_emoji_without_thumbnail(tmp_path, 
         await bot.handle('token', message(2, 1, text='/describe on', kind='private'), store.config)
         await bot.handle('token', message(2, 2, sticker={'file_id':'tgs', 'is_animated':True, 'emoji':'😀'}, kind='private'), store.config)
         assert sent[-1] == 'صورتک خندان'
+        assert store.state['metrics']['stickersDescribed'] == 1
+        describe.return_value = 'smiling face'
+        await bot.handle('token', message(2, 3, sticker={'file_id':'tgs', 'is_animated':True, 'emoji':'😀'}, kind='private'), store.config)
+        assert store.state['metrics']['stickersDescribed'] == 1
         assert describe.await_args.args[1] == []
         bot.download_visual.assert_not_awaited()
+        await bot.close()
+    run(scenario())
+
+
+def test_failed_sticker_description_does_not_increase_stats(tmp_path, monkeypatch):
+    async def scenario():
+        store = Store(tmp_path)
+        await store.init()
+        store.config['chatGptApiKey'] = 'test-key'
+        bot = TelegramBot(store, AudioService())
+        bot.status['bot'] = {'id': 999, 'username': 'testbot'}
+        sent = []
+        async def fake_call(_token, method, data=None, timeout=None):
+            if method == 'sendMessage':
+                sent.append(data['text'])
+                return {'message_id': 100}
+            return True
+        bot.call = fake_call
+        monkeypatch.setattr('pybackend.telegram.describe_visual', AsyncMock(side_effect=RuntimeError('provider failed')))
+        bot.download_visual = AsyncMock(return_value=b'fake-image')
+        monkeypatch.setattr('pybackend.telegram.frames_from_media', AsyncMock(return_value=[b'jpeg']))
+        await bot.handle('token', message(2, 1, text='/describe on', kind='private'), store.config)
+        await bot.handle('token', message(2, 2, sticker={'file_id': 'sticker-id'}, kind='private'), store.config)
+        assert store.state['metrics']['stickersDescribed'] == 0
+        assert 'ممکن نشد' in sent[-1]
         await bot.close()
     run(scenario())
 
