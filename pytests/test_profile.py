@@ -78,7 +78,8 @@ def test_profile_uses_sol_medium_and_rejects_invented_evidence(monkeypatch):
         {'id':'2','author_id':'6','timestamp':2,'text':'جواب'}]))
     assert observed['model'] == 'cx/gpt-6-sol(medium)'
     assert observed['reasoning_effort'] == 'medium'
-    assert observed['messages'][0]['content'] == 'پرامپت سفارشی کارت'
+    assert observed['messages'][0]['content'].startswith('پرامپت سفارشی کارت')
+    assert '۲۰۰۰ پیام اخیر همین گروه' in observed['messages'][0]['content']
     assert card['chat_personality'] is None
     assert 'analysis_authorized' not in json.loads(observed['messages'][1]['content'])
     assert len(json.loads(observed['messages'][1]['content'])['messages']) == 2

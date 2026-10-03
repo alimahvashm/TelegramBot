@@ -12,6 +12,12 @@ FIELDS = ('chat_personality', 'social_orientation', 'attractive_trait',
           'annoying_trait', 'superpower', 'nickname')
 LABELS = ('شخصیت گفتگویی', 'گرایش اجتماعی', 'ویژگی جذاب', 'ویژگی روی مخ',
           'قدرت ویژهٔ چتی', 'لقب اختصاصی')
+GROUP_CONTEXT_RULE = (
+    '\n\nدامنهٔ دادهٔ این درخواست: آرایهٔ messages شامل حداکثر ۲۰۰۰ پیام اخیر همین گروه است. '
+    'همهٔ پیام‌ها را برای فهم زمینه و واکنش‌های گفتگو بخوان، اما فقط پیام‌هایی که author_id آن‌ها '
+    'با target_user_id برابر است شاهد مستقیم ویژگی‌های فرد هدف هستند. پیام‌های با نویسندهٔ نامشخص '
+    'یا پیام دیگران را به فرد هدف نسبت نده. محدودیت ۵۰۰ پیام نسخه‌های قبلی در این درخواست اعمال نمی‌شود.'
+)
 
 
 class LegacyProfileArchive:
@@ -97,7 +103,7 @@ async def generate_profile(config: dict, user_id: str, messages: list[dict]) -> 
         result = await request_json(client, 'POST', base_url + '/chat/completions', timeout=120,
             headers={'Authorization': 'Bearer ' + config['chatGptApiKey']}, json={
                 'model': model, 'reasoning_effort': 'medium', 'max_completion_tokens': 5500,
-                'messages': [{'role': 'system', 'content': config['profileSystemPrompt']},
+                'messages': [{'role': 'system', 'content': config['profileSystemPrompt'] + GROUP_CONTEXT_RULE},
                              {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}]})
     choice = (result.get('choices') or [{}])[0]
     raw = choice.get('message', {}).get('content')
