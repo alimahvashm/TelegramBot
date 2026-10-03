@@ -48,6 +48,7 @@ class Store:
             chat.setdefault('pdfCount', 0)
             chat.setdefault('lastPdfAt', None)
             chat.setdefault('describeMedia', False)
+            chat.pop('profileConsent', None)
         self.prune()
         await self.prune_education_notes()
         await self.prune_education_images()

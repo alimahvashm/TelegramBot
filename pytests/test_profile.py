@@ -4,7 +4,7 @@ import time
 from unittest.mock import AsyncMock
 
 from pybackend.audio import AudioService
-from pybackend.profile import ProfileArchive, _validated_card, generate_profile
+from pybackend.profile import ProfileArchive, FIELDS, format_profile, generate_profile
 from pybackend.store import Store
 from pybackend.telegram import TelegramBot
 
@@ -28,7 +28,7 @@ def test_profile_archive_is_capped_and_isolated(tmp_path):
     assert archive.recent('-1', '6')[0]['text'] == 'other user'
 
 
-def test_profile_opt_in_target_and_revoke(tmp_path, monkeypatch):
+def test_profile_username_uses_group_messages_without_activation(tmp_path, monkeypatch):
     async def scenario():
         store = Store(tmp_path)
         await store.init()
@@ -46,20 +46,15 @@ def test_profile_opt_in_target_and_revoke(tmp_path, monkeypatch):
         def msg(chat_id, mid, uid, text, username=''):
             return {'chat': {'id': chat_id, 'type': 'supergroup', 'title': 'Group'}, 'message_id': mid,
                     'date': int(time.time()), 'from': {'id': uid, 'first_name': 'User', 'username': username}, 'text': text}
-        await bot.handle('token', msg(-1, 1, 5, 'before consent', 'target5'), store.config)
-        assert bot.profile_archive.recent('-1', '5') == []
-        await bot.handle('token', msg(-1, 2, 6, '/profile 5'), store.config)
-        assert 'رضایت نداده' in sent[-1]
-        await bot.handle('token', msg(-1, 3, 5, '/profile on', 'target5'), store.config)
-        await bot.handle('token', msg(-1, 4, 5, 'after consent', 'target5'), store.config)
+        await bot.handle('token', msg(-1, 1, 5, 'first message', 'target5'), store.config)
+        await bot.handle('token', msg(-1, 4, 5, 'second message', 'target5'), store.config)
         await bot.handle('token', msg(-2, 1, 5, 'another group', 'target5'), store.config)
         await bot.handle('token', msg(-1, 5, 6, '/profile @target5'), store.config)
         assert generate.await_args.args[1] == '5'
-        assert [item['text'] for item in generate.await_args.args[2]] == ['after consent']
-        await bot.handle('token', msg(-1, 6, 5, '/profile off', 'target5'), store.config)
-        assert bot.profile_archive.recent('-1', '5') == []
-        await bot.handle('token', msg(-1, 7, 6, '/profile 5'), store.config)
-        assert 'رضایت نداده' in sent[-1]
+        assert [item['text'] for item in generate.await_args.args[2]] == ['first message', 'second message']
+        assert 'کارت گفتگویی' in sent[-1]
+        await bot.handle('token', msg(-1, 6, 6, '/profile unknown'), store.config)
+        assert 'از /profile @username استفاده کن' in sent[-1]
         await bot.close()
     run(scenario())
 
@@ -77,10 +72,16 @@ def test_profile_uses_sol_medium_and_rejects_invented_evidence(monkeypatch):
     monkeypatch.setattr('pybackend.profile.request_json', fake_request)
     config = {'chatGptApiKey': 'test', 'chatGptBaseUrl': 'https://router.wizdin.xyz/v1'}
     card = run(generate_profile(config, '5', [{'id':'1','author_id':'5','timestamp':1,'text':'سلام'}]))
-    assert observed['model'] == 'cx/gpt-6.1-sol(medium)'
+    assert observed['model'] == 'cx/gpt-6-sol(medium)'
     assert observed['reasoning_effort'] == 'medium'
     assert card['chat_personality'] is None
-    assert json.loads(observed['messages'][1]['content'])['analysis_authorized'] is True
+    assert 'analysis_authorized' not in json.loads(observed['messages'][1]['content'])
+
+
+def test_profile_shows_all_fields_when_evidence_is_missing():
+    card = {field: None for field in FIELDS}
+    output = format_profile(card, '@target5', 2)
+    assert output.count('شواهد کافی نیست') == 6
 
 
 def test_chat_history_keeps_latest_2000(tmp_path):

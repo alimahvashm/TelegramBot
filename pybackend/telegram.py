@@ -261,7 +261,7 @@ class TelegramBot:
                 'sender': sender, 'text': text})
             author = message.get('from') or {}
             user_id = str(author.get('id', ''))
-            if (chat['type'] in ('group', 'supergroup') and user_id in chat.get('profileConsent', {})
+            if (chat['type'] in ('group', 'supergroup') and user_id
                     and not message.get('forward_origin') and not message.get('forward_from')
                     and not message.get('forward_date') and not message.get('via_bot')
                     and not message.get('is_automatic_forward')
@@ -311,22 +311,7 @@ class TelegramBot:
         sender_id = str(author.get('id', ''))
         if not sender_id:
             await self.reply(token, message, 'شناسهٔ فرستنده مشخص نیست.'); return
-        consent = chat.setdefault('profileConsent', {})
         names = chat.setdefault('profileUsernames', {})
-        if argument.lower() in ('on', 'off'):
-            if argument.lower() == 'on':
-                consent[sender_id] = True
-                username = author.get('username', '').lower()
-                if username:
-                    names[username] = sender_id
-                await self.reply(token, message, 'کارت گفتگویی برای تو در این گروه فعال شد. پیام‌های بعدی‌ات، تا ۵۰۰ پیام، برای ساخت کارت ثبت می‌شوند. برای لغو و حذفشان /profile off را بفرست.')
-            else:
-                consent.pop(sender_id, None)
-                names = {name: uid for name, uid in names.items() if uid != sender_id}
-                chat['profileUsernames'] = names
-                self.profile_archive.forget(chat['id'], sender_id)
-                await self.reply(token, message, 'رضایتت لغو شد و پیام‌های ذخیره‌شده برای کارت در این گروه حذف شدند.')
-            return
         source = message.get('reply_to_message') or {}
         target_id = None
         target_name = None
@@ -349,14 +334,11 @@ class TelegramBot:
             target_id = str(source['from']['id'])
             target_name = source['from'].get('first_name')
         if not target_id:
-            await self.reply(token, message, 'روی پیام فرد ریپلای کن و /profile بفرست، یا /profile @username، /profile شناسه، /profile me را به‌کار ببر. هر فرد باید اول در همین گروه /profile on بفرستد.')
-            return
-        if target_id not in consent:
-            await self.reply(token, message, 'این فرد هنوز در این گروه رضایت نداده است. خودش باید /profile on را بفرستد.')
+            await self.reply(token, message, 'از /profile @username استفاده کن. می‌توانی روی پیام فرد هم ریپلای کنی و /profile بفرستی. اگر نام کاربری پیدا نشد، فرد باید یک پیام جدید در گروه بفرستد.')
             return
         messages = self.profile_archive.recent(chat['id'], target_id)
         if not messages:
-            await self.reply(token, message, 'هنوز پیامی پس از فعال‌سازی کارت از این فرد ثبت نشده است.')
+            await self.reply(token, message, 'هنوز پیامی از این فرد در این گروه برای ساخت کارت ثبت نشده است.')
             return
         try:
             card = await generate_profile(config, target_id, messages)
