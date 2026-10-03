@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PROMPTS = json.loads((Path(__file__).resolve().parent.parent / 'shared' / 'prompts.json').read_text())
+OLD_PROFILE_SCOPE = 'تو نویسندهٔ کارت شخصیت گفتگویی فارسی هستی. فقط پیام‌های نویسندهٔ هدف را، حداکثر ۵۰۰ پیام اخیر، بررسی کن.'
+NEW_PROFILE_SCOPE = 'تو نویسندهٔ کارت شخصیت گفتگویی فارسی هستی. تا ۲۰۰۰ پیام اخیر همان گروه را برای فهم زمینه، واکنش‌ها و مسیر گفتگو بخوان؛ ویژگی‌های فرد هدف را فقط از پیام‌های خود او و تعاملش در این زمینه استنتاج کن.'
 SECRETS = ('token', 'chatGptApiKey', 'openRouterApiKey', 'geminiApiKey', 'googleSpeechApiKey')
 
 class Config(BaseModel):
@@ -31,6 +33,11 @@ class Config(BaseModel):
     summarySystemPrompt: str = Field(default=PROMPTS['summary'], min_length=1, max_length=12000)
     educationSystemPrompt: str = Field(default=PROMPTS['education'], min_length=1, max_length=12000)
     profileSystemPrompt: str = Field(default=PROMPTS['profile'], min_length=1, max_length=12000)
+
+    @field_validator('profileSystemPrompt', mode='before')
+    @classmethod
+    def upgrade_profile_scope(cls, value: str) -> str:
+        return value.replace(OLD_PROFILE_SCOPE, NEW_PROFILE_SCOPE) if isinstance(value, str) else value
 
     @field_validator(*SECRETS)
     @classmethod

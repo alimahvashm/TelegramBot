@@ -12,7 +12,7 @@ os.environ['ADMIN_PASSWORD'] = 'abcdefghijklmnop'
 os.environ['COOKIE_SECURE'] = 'false'
 from pybackend.app import create_app
 from pybackend.audio import AudioService
-from pybackend.config import PROMPTS, merge_config, public_config
+from pybackend.config import PROMPTS, OLD_PROFILE_SCOPE, NEW_PROFILE_SCOPE, merge_config, public_config
 from pybackend.pdf import render_education_pdf
 from pybackend.store import Store
 from pybackend.telegram import TelegramBot
@@ -75,6 +75,18 @@ def test_existing_config_gets_default_profile_prompt(tmp_path):
         restored = Store(tmp_path)
         await restored.init()
         assert restored.config['profileSystemPrompt'] == PROMPTS['profile']
+    run(scenario())
+
+
+def test_existing_custom_profile_prompt_keeps_edits_and_uses_group_context(tmp_path):
+    async def scenario():
+        store = Store(tmp_path)
+        await store.init()
+        old_config = {**store.config, 'profileSystemPrompt': OLD_PROFILE_SCOPE + ' سبک دلخواه من.'}
+        (tmp_path / 'bot_config.json').write_text(json.dumps(old_config))
+        restored = Store(tmp_path)
+        await restored.init()
+        assert restored.config['profileSystemPrompt'] == NEW_PROFILE_SCOPE + ' سبک دلخواه من.'
     run(scenario())
 
 

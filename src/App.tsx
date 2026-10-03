@@ -987,7 +987,7 @@ function Dashboard({ logout }: { logout: () => void }) {
                     onChange={(e) => change('profileSystemPrompt', e.target.value)}
                   />
                   <div className="prompt-meta">
-                    <span>Used for /profile. Keep the JSON fields and evidence IDs in the prompt.</span>
+                    <span>Used for /profile with up to 2,000 group messages. Keep the JSON fields and evidence IDs.</span>
                     <span>{config.profileSystemPrompt.length.toLocaleString()} / 12,000</span>
                   </div>
                   <button

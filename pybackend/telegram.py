@@ -15,7 +15,7 @@ from .education_images import MAX_EDUCATION_IMAGES, prepare_education_image
 from .providers import summarize, create_education_notes, answer_education_question, describe_education_image
 from .visual import MAX_VISUAL_BYTES, describe_visual, frames_from_media
 from .store import Store
-from .profile import ProfileArchive, generate_profile, format_profile
+from .profile import LegacyProfileArchive, group_profile_messages, generate_profile, format_profile
 
 MAX_IMAGE = 5 * 1024 * 1024
 
@@ -38,7 +38,7 @@ class TelegramBot:
         self.pending_images = {}
         self.album_photos = {}
         self.visual_workers = asyncio.Semaphore(3)
-        self.profile_archive = ProfileArchive(store.dir)
+        self.profile_archive = LegacyProfileArchive(store.dir)
 
     async def close(self):
         await self.stop()
@@ -255,16 +255,17 @@ class TelegramBot:
                 await self.stats(token, message); return
         sender = ' '.join(filter(None, [message.get('from', {}).get('first_name'), message.get('from', {}).get('last_name')])) or message.get('sender_chat', {}).get('title') or 'Unknown'
         def remember(text):
-            self.store.remember(chat, {'messageId': message['message_id'], 'timestamp': message.get('date', 0) * 1000,
-                'sender': sender, 'text': text})
             author = message.get('from') or {}
             user_id = str(author.get('id', ''))
-            if (chat['type'] in ('group', 'supergroup') and user_id
-                    and not message.get('forward_origin') and not message.get('forward_from')
-                    and not message.get('forward_date') and not message.get('via_bot')
-                    and not message.get('is_automatic_forward')
-                    and (message.get('text') or message.get('caption') or message.get('voice')
-                         or message.get('audio') or message.get('video_note'))):
+            authored = (user_id and not message.get('forward_origin') and not message.get('forward_from')
+                        and not message.get('forward_date') and not message.get('via_bot')
+                        and not message.get('is_automatic_forward')
+                        and (message.get('text') or message.get('caption') or message.get('voice')
+                             or message.get('audio') or message.get('video_note')))
+            self.store.remember(chat, {'messageId': message['message_id'], 'timestamp': message.get('date', 0) * 1000,
+                'sender': sender, 'text': text, 'authorId': user_id if authored else None,
+                'replyToId': (message.get('reply_to_message') or {}).get('message_id')})
+            if chat['type'] in ('group', 'supergroup') and authored:
                 username = author.get('username', '').lower()
                 if username:
                     aliases = chat.setdefault('profileUsernames', {})
@@ -272,9 +273,12 @@ class TelegramBot:
                         if mapped_id == user_id and old != username:
                             aliases.pop(old, None)
                     aliases[username] = user_id
-                self.profile_archive.remember(chat['id'], user_id, message['message_id'],
-                                              message.get('date', 0) * 1000, text)
-        text = message.get('text') or message.get('caption') or (f'[Shared file: {message["document"].get("file_name", "unnamed")}]' if message.get('document') else '')
+        text = (message.get('text') or message.get('caption') or
+                (f'[Shared file: {message["document"].get("file_name", "unnamed")}]' if message.get('document') else '') or
+                (f'[Sticker: {message["sticker"].get("emoji", "")}]' if message.get('sticker') else '') or
+                ('[GIF]' if message.get('animation') else '') or
+                ('[Video]' if message.get('video') else '') or
+                ('[Photo]' if message.get('photo') else ''))
         if text:
             remember(text)
         gif_document = (message.get('document') or {}).get('mime_type') == 'image/gif'
@@ -334,9 +338,12 @@ class TelegramBot:
         if not target_id:
             await self.reply(token, message, 'از /profile @username استفاده کن. می‌توانی روی پیام فرد هم ریپلای کنی و /profile بفرستی. اگر نام کاربری پیدا نشد، فرد باید یک پیام جدید در گروه بفرستد.')
             return
-        messages = self.profile_archive.recent(chat['id'], target_id)
-        if not messages:
-            await self.reply(token, message, 'هنوز پیامی از این فرد در این گروه برای ساخت کارت ثبت نشده است.')
+        history = chat.get('history', [])[-2000:]
+        legacy = self.profile_archive.legacy_authors(chat['id'], history[0]['messageId']) if history else {}
+        messages = group_profile_messages(history, legacy)
+        target_count = sum(item['author_id'] == target_id for item in messages)
+        if not target_count:
+            await self.reply(token, message, 'در ۲۰۰۰ پیام اخیر این گروه، پیام قابل‌انتساب به این فرد پیدا نشد.')
             return
         try:
             card = await generate_profile(config, target_id, messages)
@@ -344,7 +351,7 @@ class TelegramBot:
             self.store.log('warn', f'Profile generation failed in chat {chat["id"]}.')
             await self.reply(token, message, 'ساخت کارت فعلاً ممکن نشد. دسترسی یا سهمیهٔ مدل را بررسی کن و دوباره تلاش کن.')
             return
-        await self.reply(token, message, format_profile(card, target_name or f'کاربر {target_id}', len(messages)))
+        await self.reply(token, message, format_profile(card, target_name or f'کاربر {target_id}', len(messages), target_count))
         if message['message_id'] > chat.get('lastProfileMessageId', 0):
             chat['lastProfileMessageId'] = message['message_id']
             self.store.state['metrics']['profilesGenerated'] += 1

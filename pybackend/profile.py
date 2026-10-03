@@ -1,4 +1,4 @@
-"""Per-group message archive and evidence-based Persian conversation cards."""
+"""Group-context input and evidence-based Persian conversation cards."""
 import json
 import os
 import sqlite3
@@ -14,7 +14,7 @@ LABELS = ('شخصیت گفتگویی', 'گرایش اجتماعی', 'ویژگی 
           'قدرت ویژهٔ چتی', 'لقب اختصاصی')
 
 
-class ProfileArchive:
+class LegacyProfileArchive:
     def __init__(self, directory: str | Path):
         self.path = Path(directory) / 'profile_messages.sqlite3'
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -27,23 +27,29 @@ class ProfileArchive:
         os.chmod(self.path, 0o600)
         return db
 
-    def remember(self, chat_id: str, user_id: str, message_id: int, timestamp: int, text: str):
-        text = text.strip()[:1200]
-        if not text:
-            return
+    def legacy_authors(self, chat_id: str, first_message_id: int) -> dict[int, str]:
+        """Identify authors in history entries written before author IDs were stored."""
         with self._connect() as db:
-            db.execute('INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?)', (chat_id, user_id, message_id, timestamp, text))
-            db.execute('DELETE FROM messages WHERE chat_id=? AND user_id=? AND message_id NOT IN (SELECT message_id FROM messages WHERE chat_id=? AND user_id=? ORDER BY message_id DESC LIMIT 500)', (chat_id, user_id, chat_id, user_id))
+            rows = db.execute('SELECT message_id,user_id FROM messages WHERE chat_id=? AND message_id>=?',
+                              (chat_id, first_message_id)).fetchall()
+        return {message_id: user_id for message_id, user_id in rows}
 
-    def forget(self, chat_id: str, user_id: str):
-        with self._connect() as db:
-            db.execute('DELETE FROM messages WHERE chat_id=? AND user_id=?', (chat_id, user_id))
 
-    def recent(self, chat_id: str, user_id: str) -> list[dict]:
-        with self._connect() as db:
-            rows = db.execute('SELECT message_id,timestamp,text FROM messages WHERE chat_id=? AND user_id=? ORDER BY message_id DESC LIMIT 500', (chat_id, user_id)).fetchall()
-        return [{'id': str(mid), 'author_id': user_id, 'timestamp': timestamp, 'text': text}
-                for mid, timestamp, text in reversed(rows)]
+def group_profile_messages(history: list[dict], legacy_authors: dict[int, str] | None = None) -> list[dict]:
+    authors = legacy_authors or {}
+    result = []
+    for item in history[-2000:]:
+        message_id = item.get('messageId')
+        if not isinstance(message_id, int) or not isinstance(item.get('text'), str) or not item['text'].strip():
+            continue
+        author_id = item.get('authorId') or authors.get(message_id)
+        message = {'id': str(message_id), 'author_id': str(author_id) if author_id else None,
+                   'timestamp': item.get('timestamp', 0), 'text': item['text'],
+                   'sender': item.get('sender', '')}
+        if item.get('replyToId'):
+            message['reply_to_id'] = str(item['replyToId'])
+        result.append(message)
+    return result
 
 
 def _validated_card(result: dict, evidence: set[str]) -> dict:
@@ -76,12 +82,17 @@ def _validated_card(result: dict, evidence: set[str]) -> dict:
 async def generate_profile(config: dict, user_id: str, messages: list[dict]) -> dict:
     if not config.get('chatGptApiKey'):
         raise AppError('Profile model API key is not configured.', 503)
-    if not messages:
-        raise AppError('No group messages are available yet.', 422)
+    selected = messages[-2000:]
+    if not any(item.get('author_id') == user_id for item in selected):
+        raise AppError('No messages from this user are available in recent group history.', 422)
     base_url = config['chatGptBaseUrl'].rstrip('/')
     model = 'gpt-6-sol' if base_url == 'https://api.openai.com/v1' else 'cx/gpt-6-sol(medium)'
+    caps = [500 if item.get('author_id') == user_id else 220 for item in selected]
+    proposed = sum(min(len(item['text']), cap) for item, cap in zip(selected, caps))
+    scale = min(1.0, 300000 / proposed) if proposed else 1.0
     payload = {'target_user_id': user_id, 'messages_order': 'oldest_first',
-               'messages': [{**item, 'text': item['text'][:600]} for item in messages[-500:]]}
+               'messages': [{**item, 'text': item['text'][:max(80, int(cap * scale))]}
+                            for item, cap in zip(selected, caps)]}
     async with httpx.AsyncClient() as client:
         result = await request_json(client, 'POST', base_url + '/chat/completions', timeout=120,
             headers={'Authorization': 'Bearer ' + config['chatGptApiKey']}, json={
@@ -96,11 +107,12 @@ async def generate_profile(config: dict, user_id: str, messages: list[dict]) -> 
         card = json.loads(raw.strip())
     except (ValueError, TypeError) as exc:
         raise AppError('The profile model returned invalid JSON.', 502) from exc
-    return _validated_card(card, {item['id'] for item in messages})
+    return _validated_card(card, {item['id'] for item in selected if item.get('author_id') == user_id})
 
 
-def format_profile(card: dict, name: str, message_count: int) -> str:
-    lines = [f'🎭 کارت گفتگویی {name}', f'بر اساس {message_count} پیام ثبت‌شده در همین گروه']
+def format_profile(card: dict, name: str, message_count: int, target_count: int) -> str:
+    lines = [f'🎭 کارت گفتگویی {name}',
+             f'بر اساس {message_count} پیام اخیر گروه، شامل {target_count} پیام از این کاربر']
     for field, label in zip(FIELDS, LABELS):
         value = card[field]
         lines.append(f'\n{label}: {value["text"] if value else "شواهد کافی نیست"}')
