@@ -743,7 +743,19 @@ class TelegramBot:
 
     async def gpt(self, token: str, message: dict, chat: dict, config: dict, argument: str):
         source = message.get('reply_to_message') or {}
-        question = argument or source.get('text') or source.get('caption') or ''
+        reply_context = None
+        if source:
+            saved = next((item for item in reversed(chat.get('history', []))
+                          if item.get('messageId') == source.get('message_id')), {})
+            author = source.get('from') or {}
+            sender = (' '.join(filter(None, [author.get('first_name'), author.get('last_name')]))
+                      or (source.get('sender_chat') or {}).get('title') or saved.get('sender') or 'Unknown')
+            media_type = next((kind for kind in ('photo', 'video', 'voice', 'audio', 'document', 'sticker')
+                               if source.get(kind)), None)
+            reply_context = {'messageId': source.get('message_id'), 'sender': sender,
+                             'text': (source.get('text') or source.get('caption') or saved.get('text') or '')[:4000],
+                             'mediaType': media_type}
+        question = argument or ('Explain the replied-to message.' if reply_context and reply_context['text'] else '')
         if not question.strip():
             await self.reply(token, message, 'Use /gpt followed by your question, or reply to a text message with /gpt.')
             return
@@ -755,7 +767,7 @@ class TelegramBot:
         except Exception:
             pass
         try:
-            answer = await answer_chat_question(config, question, chat.get('history', []).copy())
+            answer = await answer_chat_question(config, question, chat.get('history', []).copy(), reply_context)
         except Exception as exc:
             self.store.log('warn', f'GPT answer failed in chat {chat["id"]}' +
                            (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')

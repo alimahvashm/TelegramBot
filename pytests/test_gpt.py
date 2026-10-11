@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from unittest.mock import AsyncMock
 import pytest
 
 from pybackend import gpt
@@ -65,6 +66,26 @@ def test_gpt_uses_available_custom_router_model(monkeypatch):
     assert requests[0]['model'] == 'cx/gpt-5.6-luna'
 
 
+def test_gpt_includes_replied_message_outside_recent_twenty(monkeypatch):
+    requests = []
+
+    async def fake_request(_client, _method, _url, **kwargs):
+        requests.append(kwargs['json'])
+        return {'choices': [{'message': {'content': 'It means blue.'}, 'finish_reason': 'stop'}]}
+
+    monkeypatch.setattr(gpt, 'request_json', fake_request)
+    history = [{'messageId': n, 'timestamp': n * 1000, 'sender': 'A', 'text': f'Message {n}'}
+               for n in range(1, 26)]
+    reply = {'messageId': 1, 'sender': 'A', 'text': 'The code word is blue.', 'mediaType': None}
+    answer = run(gpt.answer_chat_question({'chatGptApiKey': 'test-key',
+        'chatGptBaseUrl': 'https://router.example/v1'}, 'What does this mean?', history, reply))
+    prompt = json.loads(requests[0]['messages'][1]['content'])
+    assert answer == 'It means blue.'
+    assert prompt['question'] == 'What does this mean?'
+    assert prompt['replied_to_message'] == reply
+    assert all(item['messageId'] != 1 for item in prompt['recent_messages'])
+
+
 def test_gpt_command_uses_only_its_chat_and_remembers_answer(tmp_path, monkeypatch):
     pytest.importorskip('PIL')
     from pybackend.telegram import TelegramBot
@@ -79,9 +100,10 @@ def test_gpt_command_uses_only_its_chat_and_remembers_answer(tmp_path, monkeypat
             sent.append((method, data))
             return {'message_id': 100 + len(sent)} if method == 'sendMessage' else True
 
-        async def fake_answer(_config, question, history):
+        async def fake_answer(_config, question, history, reply_to):
             assert question == 'What happened?'
             assert [item['text'] for item in history] == ['Private context']
+            assert reply_to is None
             return 'Here is the answer.'
 
         monkeypatch.setattr('pybackend.telegram.answer_chat_question', fake_answer)
@@ -97,6 +119,39 @@ def test_gpt_command_uses_only_its_chat_and_remembers_answer(tmp_path, monkeypat
         assert any(method == 'sendMessage' and data['text'] == 'Here is the answer.' for method, data in sent)
         assert [item['text'] for item in store.state['chats']['1']['history']] == [
             'Private context', 'What happened?', 'Here is the answer.']
+        await bot.close()
+
+    run(scenario())
+
+
+def test_gpt_reply_command_passes_quoted_message_and_question(tmp_path, monkeypatch):
+    pytest.importorskip('PIL')
+    from pybackend.telegram import TelegramBot
+
+    async def scenario():
+        store = Store(tmp_path)
+        await store.init()
+        bot = TelegramBot(store, AudioService())
+        bot.status['bot'] = {'id': 99, 'username': 'testbot'}
+        bot.call = AsyncMock(return_value={'message_id': 100})
+        captured = []
+
+        async def fake_answer(_config, question, history, reply_to):
+            captured.append((question, history, reply_to))
+            return 'It refers to the older message.'
+
+        monkeypatch.setattr('pybackend.telegram.answer_chat_question', fake_answer)
+        source = {'message_id': 1, 'date': int(time.time()) - 100,
+                  'from': {'id': 9, 'first_name': 'Alice'}, 'text': 'An older topic.'}
+        message = {'chat': {'id': -1, 'type': 'supergroup', 'title': 'Group'},
+                   'message_id': 50, 'date': int(time.time()),
+                   'from': {'id': 2, 'first_name': 'Bob'},
+                   'text': '/gpt What does this mean?', 'reply_to_message': source}
+        await bot.handle('token', message, store.config)
+        assert captured[0][0] == 'What does this mean?'
+        assert captured[0][2] == {'messageId': 1, 'sender': 'Alice',
+                                  'text': 'An older topic.', 'mediaType': None}
+        assert captured[0][1] == []
         await bot.close()
 
     run(scenario())
