@@ -16,6 +16,9 @@ from .providers import summarize, create_education_notes, answer_education_quest
 from .visual import MAX_VISUAL_BYTES, describe_visual, frames_from_media
 from .store import Store
 from .profile import LegacyProfileArchive, group_profile_messages, generate_profile, format_profile
+from .instagram import MAX_LINKS, download_video, instagram_links
+from .group_report import report_messages, activity_report, analyze_report, findings_report
+from .gpt import answer_chat_question
 
 MAX_IMAGE = 5 * 1024 * 1024
 
@@ -34,10 +37,12 @@ class TelegramBot:
         self.control_lock = asyncio.Lock()
         self.education_times = {}
         self.summary_times = {}
+        self.report_times = {}
         self.question_times = {}
         self.pending_images = {}
         self.album_photos = {}
         self.visual_workers = asyncio.Semaphore(3)
+        self.instagram_workers = asyncio.Semaphore(1)
         self.profile_archive = LegacyProfileArchive(store.dir)
 
     async def close(self):
@@ -145,9 +150,11 @@ class TelegramBot:
                 await asyncio.gather(*jobs, return_exceptions=True)
 
     async def reply(self, token: str, message: dict, text: str):
+        sent = []
         for part in chunks(text):
-            await self.call(token, 'sendMessage', {'chat_id': message['chat']['id'], 'text': part,
-                'reply_parameters': {'message_id': message['message_id'], 'allow_sending_without_reply': True}})
+            sent.append(await self.call(token, 'sendMessage', {'chat_id': message['chat']['id'], 'text': part,
+                'reply_parameters': {'message_id': message['message_id'], 'allow_sending_without_reply': True}}))
+        return sent
 
     async def send_pdf(self, token: str, message: dict, pdf: bytes, caption='📚 جزوهٔ آموزشی') -> int:
         url = f'https://api.telegram.org/bot{token}/sendDocument'
@@ -251,6 +258,10 @@ class TelegramBot:
                 await self.image(token, message, chat, config); return
             if command == 'summary':
                 await self.summary(token, message, chat, config, argument); return
+            if command == 'gpt':
+                await self.gpt(token, message, chat, config, argument); return
+            if command == 'report':
+                await self.group_report(token, message, chat, config); return
             if command == 'stats':
                 await self.stats(token, message); return
         sender = ' '.join(filter(None, [message.get('from', {}).get('first_name'), message.get('from', {}).get('last_name')])) or message.get('sender_chat', {}).get('title') or 'Unknown'
@@ -281,6 +292,9 @@ class TelegramBot:
                 ('[Photo]' if message.get('photo') else ''))
         if text:
             remember(text)
+        links = instagram_links(message)
+        if links:
+            await self.instagram_videos(token, message, links)
         gif_document = (message.get('document') or {}).get('mime_type') == 'image/gif'
         if chat.get('describeMedia') and (message.get('animation') or message.get('sticker') or gif_document):
             await self.describe_message(token, message, chat, config)
@@ -305,6 +319,57 @@ class TelegramBot:
         if config['autoReply']:
             await self.reply(token, message, transcription)
             self.store.log('info', f'Transcript reply delivered to chat {chat["id"]}.')
+
+    async def group_report(self, token: str, message: dict, chat: dict, config: dict):
+        if chat['type'] not in ('group', 'supergroup'):
+            await self.reply(token, message, 'دستور /report را داخل گروه اجرا کن.'); return
+        if message.get('sender_chat') or not message.get('from', {}).get('id'):
+            await self.reply(token, message, 'برای تأیید مدیر بودن، دستور را با حساب شخصی خودت بفرست.'); return
+        try:
+            member = await self.call(token, 'getChatMember', {
+                'chat_id': chat['id'], 'user_id': message['from']['id']})
+            allowed = member.get('status') in ('creator', 'administrator')
+        except Exception:
+            await self.reply(token, message, 'تأیید دسترسی مدیر ممکن نشد؛ دوباره تلاش کن.'); return
+        if not allowed:
+            await self.reply(token, message, 'فقط مدیران گروه می‌توانند /report را اجرا کنند.'); return
+        messages = report_messages(chat['history'])
+        if not messages:
+            await self.reply(token, message, 'هنوز پیامی برای گزارش ذخیره نشده است؛ دسترسی ربات به پیام‌های گروه را بررسی کن.'); return
+        if time.monotonic() - self.report_times.get(chat['id'], float('-inf')) < 60:
+            await self.reply(token, message, 'بین گزارش‌ها ۶۰ ثانیه صبر کن.'); return
+        self.report_times[chat['id']] = time.monotonic()
+        await self.reply(token, message, '⏳ در حال بررسی ۲۰۰ پیام اخیر ذخیره‌شدهٔ گروه...')
+        output = activity_report(messages)
+        try:
+            findings = await analyze_report(config, messages, lambda text: self.store.log('warn', text))
+            output += '\n\n' + findings_report(findings, messages, chat['id'])
+        except Exception:
+            self.store.log('warn', f'Group report analysis failed in chat {chat["id"]}.')
+            output += '\n\n⚠️ تحلیل محتوایی در دسترس نیست؛ فقط آمار فعالیت نمایش داده شد. دسترسی و سهمیهٔ مدل را بررسی کن.'
+        await self.reply(token, message, output)
+
+    async def instagram_videos(self, token: str, message: dict, links: list[str]):
+        if len(links) > MAX_LINKS:
+            await self.reply(token, message, 'در هر پیام حداکثر ۳ لینک اینستاگرام دریافت می‌شود؛ لینک‌های باقی‌مانده را جدا بفرست.')
+        for link in links[:MAX_LINKS]:
+            try:
+                async with self.instagram_workers:
+                    async with download_video(link) as video:
+                        with video.open('rb') as content:
+                            response = await request_json(self.client, 'POST',
+                                f'https://api.telegram.org/bot{token}/sendVideo', timeout=120,
+                                data={'chat_id': str(message['chat']['id']), 'caption': link,
+                                      'reply_parameters': json.dumps({'message_id': message['message_id'],
+                                          'allow_sending_without_reply': True})},
+                                files={'video': ('instagram.mp4', content, 'video/mp4')})
+                        if not response.get('ok'):
+                            raise AppError('ارسال ویدیو به تلگرام ممکن نشد؛ دوباره تلاش کن.', 502)
+                self.store.log('info', f'Instagram video delivered to chat {message["chat"]["id"]}.')
+            except Exception as exc:
+                self.store.log('warn', f'Instagram video failed in chat {message["chat"]["id"]}.')
+                await self.reply(token, message, str(exc) if isinstance(exc, AppError) and exc.status in (413, 422, 504)
+                                 else 'دریافت یا ارسال ویدیوی اینستاگرام ممکن نشد؛ دوباره تلاش کن.')
 
     async def profile_command(self, token: str, message: dict, chat: dict, config: dict, argument: str):
         if chat['type'] not in ('group', 'supergroup'):
@@ -675,6 +740,40 @@ class TelegramBot:
             status = str(exc) if isinstance(exc, AppError) and exc.status in (413, 415, 422) else \
                 'خواندن تصویر یا به‌روزرسانی PDF ممکن نشد. لطفاً تصویر واضح‌تری بفرستید یا دسترسی مدل را بررسی کنید.'
         await self.call(token, 'editMessageText', {'chat_id': chat['id'], 'message_id': progress['message_id'], 'text': status})
+
+    async def gpt(self, token: str, message: dict, chat: dict, config: dict, argument: str):
+        source = message.get('reply_to_message') or {}
+        question = argument or source.get('text') or source.get('caption') or ''
+        if not question.strip():
+            await self.reply(token, message, 'Use /gpt followed by your question, or reply to a text message with /gpt.')
+            return
+        if len(question) > 4000:
+            await self.reply(token, message, 'Keep the /gpt question under 4,000 characters.')
+            return
+        try:
+            await self.call(token, 'sendChatAction', {'chat_id': chat['id'], 'action': 'typing'})
+        except Exception:
+            pass
+        try:
+            answer = await answer_chat_question(config, question, chat.get('history', []).copy())
+        except Exception as exc:
+            self.store.log('warn', f'GPT answer failed in chat {chat["id"]}' +
+                           (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')
+            await self.reply(token, message, str(exc) if isinstance(exc, AppError) and exc.status in (400, 503)
+                             else 'Could not answer right now. Check the API key, model access and quota, then try again.')
+            return
+        sent = await self.reply(token, message, answer)
+        sender = ' '.join(filter(None, [message.get('from', {}).get('first_name'),
+                                         message.get('from', {}).get('last_name')])) or 'Unknown'
+        self.store.remember(chat, {'messageId': message['message_id'], 'timestamp': message.get('date', 0) * 1000,
+                                   'sender': sender, 'text': question, 'authorId': str(message.get('from', {}).get('id', '')),
+                                   'replyToId': source.get('message_id')})
+        for part, response in zip(chunks(answer), sent):
+            if isinstance(response, dict) and response.get('message_id'):
+                self.store.remember(chat, {'messageId': response['message_id'],
+                                           'timestamp': response.get('date', message.get('date', 0)) * 1000,
+                                           'sender': 'GPT', 'text': part, 'authorId': None,
+                                           'replyToId': message['message_id']})
 
     async def summary(self, token: str, message: dict, chat: dict, config: dict, argument: str):
         try:

@@ -5,3 +5,4 @@ python-multipart==0.0.32
 weasyprint==70.0
 pillow==12.3.0
 pydantic==2.13.5
+yt-dlp==2026.8.19

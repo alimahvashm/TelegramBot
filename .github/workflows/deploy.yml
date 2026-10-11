@@ -50,7 +50,10 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          test -n "$SSH_PRIVATE_KEY"
+          if [[ -z "$SSH_PRIVATE_KEY" ]]; then
+            echo '::error::DEPLOY_SSH_KEY is missing or empty. Add the deployment private key in repository Settings > Secrets and variables > Actions.'
+            exit 1
+          fi
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
