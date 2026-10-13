@@ -767,7 +767,11 @@ class TelegramBot:
         except Exception:
             pass
         try:
-            answer = await answer_chat_question(config, question, chat.get('history', []).copy(), reply_context)
+            author = message.get('from') or {}
+            asker = {'id': str(author['id']) if author.get('id') is not None else None,
+                     'name': ' '.join(filter(None, [author.get('first_name'), author.get('last_name')])) or 'Unknown',
+                     'username': author.get('username') or None}
+            answer = await answer_chat_question(config, question, chat.get('history', []).copy(), reply_context, asker)
         except Exception as exc:
             self.store.log('warn', f'GPT answer failed in chat {chat["id"]}' +
                            (f' (HTTP {exc.status})' if isinstance(exc, AppError) else '') + '.')
